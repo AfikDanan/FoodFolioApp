@@ -1,0 +1,126 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: FoodFolio recipe import API (Lambda + HTTP API + DynamoDB rate limits)
+
+Parameters:
+  LlmModel:
+    Type: String
+    Default: gpt-6-luna
+  LlmBaseUrl:
+    Type: String
+    Default: ""
+    Description: Leave empty for api.openai.com, or set an OpenAI-compatible endpoint.
+  LlmApiKeyParam:
+    Type: String
+    Default: /foodfolio/llm-api-key
+    Description: SecureString SSM parameter holding the model API key. Create it before deploying.
+  AlertEmail:
+    Type: String
+    Description: Receives budget alerts.
+  MonthlyBudgetUsd:
+    Type: Number
+    Default: 10
+  ReservedConcurrency:
+    Type: Number
+    Default: 0
+    Description: Caps parallel imports (and so parallel spend). 0 = unreserved. New AWS accounts may not have headroom to reserve any.
+
+Conditions:
+  HasReservedConcurrency: !Not [!Equals [!Ref ReservedConcurrency, 0]]
+
+Globals:
+  Function:
+    Runtime: python3.13
+    Architectures: [arm64]
+    MemorySize: 512
+    Timeout: 27 # HTTP API cuts connections at 30 s
+    Environment:
+      Variables:
+        LLM_MODEL: !Ref LlmModel
+        LLM_BASE_URL: !Ref LlmBaseUrl
+        LLM_API_KEY_PARAM: !Ref LlmApiKeyParam
+        RATE_TABLE: !Ref RateTable
+        LIMIT_PER_INSTALL: "15"
+        LIMIT_PER_IP: "40"
+        LIMIT_GLOBAL: "1500"
+
+Resources:
+  ImportFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/
+      Handler: foodfolio.handler.lambda_handler
+      ReservedConcurrentExecutions: !If [HasReservedConcurrency, !Ref ReservedConcurrency, !Ref AWS::NoValue]
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref RateTable
+        - Statement:
+            - Effect: Allow
+              Action: ssm:GetParameter
+              Resource: !Sub "arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter${LlmApiKeyParam}"
+      Events:
+        Import:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Method: POST
+            Path: /import
+        Substitute:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Method: POST
+            Path: /substitute
+
+  Api:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      DefaultRouteSettings:
+        ThrottlingBurstLimit: 10
+        ThrottlingRateLimit: 5
+
+  RateTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: pk
+          AttributeType: S
+      KeySchema:
+        - AttributeName: pk
+          KeyType: HASH
+      TimeToLiveSpecification:
+        AttributeName: ttl
+        Enabled: true
+
+  MonthlyBudget:
+    Type: AWS::Budgets::Budget
+    Properties:
+      Budget:
+        BudgetType: COST
+        TimeUnit: MONTHLY
+        BudgetLimit:
+          Amount: !Ref MonthlyBudgetUsd
+          Unit: USD
+      NotificationsWithSubscribers:
+        - Notification:
+            NotificationType: ACTUAL
+            ComparisonOperator: GREATER_THAN
+            Threshold: 80
+            ThresholdType: PERCENTAGE
+          Subscribers:
+            - SubscriptionType: EMAIL
+              Address: !Ref AlertEmail
+        - Notification:
+            NotificationType: FORECASTED
+            ComparisonOperator: GREATER_THAN
+            Threshold: 100
+            ThresholdType: PERCENTAGE
+          Subscribers:
+            - SubscriptionType: EMAIL
+              Address: !Ref AlertEmail
+
+Outputs:
+  ApiUrl:
+    Description: Set as EXPO_PUBLIC_API_URL in the app.
+    Value: !Sub "https://${Api}.execute-api.${AWS::Region}.${AWS::URLSuffix}"

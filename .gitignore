@@ -40,3 +40,11 @@ yarn-error.*
 package-lock.json
 yarn.lock
 package.json
+# Backend
+Backend/.venv/
+Backend/**/__pycache__/
+Backend/.aws-sam/
+Backend/.pytest_cache/
+Backend/.ruff_cache/
+Backend/**/*.egg-info
+.env

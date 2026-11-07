@@ -1,0 +1,27 @@
+[project]
+name = "foodfolio-backend"
+version = "2.0.0"
+requires-python = ">=3.12"
+dependencies = [
+    "openai>=2.0,<3",
+    "pydantic>=2.7,<3",
+    "requests>=2.32,<3",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "ruff>=0.6", "boto3>=1.35"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["src"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "SIM"]
+
+[tool.ruff.lint.per-file-ignores]
+"src/foodfolio/prompts.py" = ["E501"] # the prompt is prose, not code
