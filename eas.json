@@ -34,6 +34,15 @@
       "env": {
         "EXPO_PUBLIC_API_URL": "https://ppjuj0cx0h.execute-api.eu-central-1.amazonaws.com"
       }
+    },
+    "apk": {
+      "distribution": "internal",
+      "android": {
+        "buildType": "apk"
+      },
+      "env": {
+        "EXPO_PUBLIC_API_URL": "https://ppjuj0cx0h.execute-api.eu-central-1.amazonaws.com"
+      }
     }
   },
   "submit": {
