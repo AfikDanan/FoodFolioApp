@@ -6,17 +6,10 @@
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
-    "splash": {
-      "image": "./assets/splash.png",
-      "resizeMode": "contain",
-      "backgroundColor": "#ffffff"
-    },
-    "assetBundlePatterns": [
-      "**/*"
-    ],
     "ios": {
       "buildNumber": "1.1.0",
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.afikdanan.FoodfolioProject"
     },
     "android": {
       "versionCode": 3,
@@ -25,9 +18,7 @@
         "backgroundColor": "#ffffff"
       },
       "permissions": [
-        "android.permission.CAMERA",
-        "android.permission.WRITE_EXTERNAL_STORAGE",
-        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.CAMERA"
       ],
       "package": "com.afikdanan.FoodfolioProject"
     },
@@ -41,12 +32,36 @@
           "photosPermission": "The app accesses your photos to upload recipes.",
           "cameraPermission": "The app need access to your camera in order to take photos of your favorite recipes."
         }
+      ],
+      "expo-font",
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/splash.png",
+          "resizeMode": "contain",
+          "backgroundColor": "#f5f2eb"
+        }
+      ],
+      "expo-asset",
+      [
+        "expo-share-intent",
+        {
+          "iosActivationRules": {
+            "NSExtensionActivationSupportsWebURLWithMaxCount": 1,
+            "NSExtensionActivationSupportsWebPageWithMaxCount": 1,
+            "NSExtensionActivationSupportsText": true
+          },
+          "androidIntentFilters": [
+            "text/*"
+          ]
+        }
       ]
     ],
     "extra": {
       "eas": {
         "projectId": "83b4a99f-d6ee-48d6-ae82-ab34b7c1e160"
       }
-    }
+    },
+    "scheme": "foodfolio"
   }
 }
