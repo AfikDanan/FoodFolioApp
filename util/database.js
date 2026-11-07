@@ -1,16 +1,28 @@
+import { Platform } from "react-native";
 import * as SQLite from "expo-sqlite";
 
 const DEFAULT_CATEGORY_IMAGE = "../images/category_placeholder.jpg";
 const DEFAULT_RECIPE_IMAGE = "../images/recipe_placeholder.jpg";
+// The design's starter categories; the planner and batch cooking key off them.
+const DEFAULT_CATEGORIES = ["ארוחות בוקר", "עיקריות", "תוספות", "סלטים", "מאפים", "קינוחים"];
 let db;
+let dbPromise;
+
+// One connection for the whole app; reopening per query is slow and fails on web.
+function getDb() {
+  // The web preview has no persistent file storage in dev, so it uses memory.
+  dbPromise ??= SQLite.openDatabaseAsync(Platform.OS === "web" ? ":memory:" : "recipes.db");
+  return dbPromise;
+}
 
 async function initDB() {
   try {
     //await resetDatabase(); // Ensure this completes before proceeding
-    db = await SQLite.openDatabaseAsync("recipes.db");
+    db = await getDb();
 
     // Set journal mode to Write-Ahead Logging
-    await db.runAsync(`PRAGMA journal_mode = WAL;`);
+    // WAL needs shared memory, which the browser build of SQLite does not have.
+    if (Platform.OS !== "web") await db.runAsync(`PRAGMA journal_mode = WAL;`);
 
     // Create the recipes table
     try {
@@ -88,6 +100,12 @@ async function initDB() {
       );
     `);
 
+    await migrateSchema();
+
+    for (const name of DEFAULT_CATEGORIES) {
+      await db.runAsync("INSERT OR IGNORE INTO categories (name) VALUES (?);", [name]);
+    }
+
     // Insert the default category
     try {
       await db.runAsync(
@@ -105,9 +123,43 @@ async function initDB() {
   }
 }
 
+async function addColumnIfMissing(table, column, definition) {
+  const cols = await db.getAllAsync(`PRAGMA table_info(${table});`);
+  if (!cols.some((c) => c.name === column)) {
+    await db.runAsync(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition};`);
+  }
+}
+
+async function migrateSchema() {
+  try {
+    await addColumnIfMissing("recipes", "servings", "INTEGER DEFAULT 4");
+    await addColumnIfMissing("shopping_list", "checked", "INTEGER DEFAULT 0");
+    await addColumnIfMissing("shopping_list", "from_recipes", "TEXT");
+    await addColumnIfMissing("meal_plan", "prep_state", "TEXT");
+    await addColumnIfMissing("recipes", "tags", "TEXT");
+    await addColumnIfMissing("recipes", "fridge_days", "INTEGER");
+    await addColumnIfMissing("recipes", "est_idx", "TEXT");
+    await db.runAsync(
+      "CREATE TABLE IF NOT EXISTS app_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);"
+    );
+  } catch (error) {
+    console.error("Error migrating schema:", error);
+  }
+}
+
+// Random per-install id, sent to the import API so it can rate-limit abuse.
+async function getInstallId() {
+  db = await getDb();
+  const row = await db.getFirstAsync("SELECT value FROM app_meta WHERE key = ?;", ["install_id"]);
+  if (row) return row.value;
+  const id = Array.from({ length: 4 }, () => Math.random().toString(36).slice(2, 10)).join("");
+  await db.runAsync("INSERT INTO app_meta (key, value) VALUES (?, ?);", ["install_id", id]);
+  return id;
+}
+
 async function fetchAllRecipes() {
   try {
-    db = await SQLite.openDatabaseAsync("recipes.db");
+    db = await getDb();
     const rows = await db.getAllAsync("SELECT * FROM recipes;");
     return rows;
   } catch (error) {
@@ -117,7 +169,7 @@ async function fetchAllRecipes() {
 
 async function fetchRecipeById(id) {
   try {
-    db = await SQLite.openDatabaseAsync("recipes.db");
+    db = await getDb();
     const row = await db.getFirstAsync(
       `
       SELECT r.*, GROUP_CONCAT(c.name) AS categoryNames 
@@ -139,7 +191,7 @@ async function fetchRecipeById(id) {
 
 async function deleteRecipeById(id) {
   try {
-    db = await SQLite.openDatabaseAsync("recipes.db");
+    db = await getDb();
     await db.runAsync("DELETE FROM recipes WHERE id = ?;", [id]);
     console.log("Recipe deleted successfully");
   } catch (error) {
@@ -149,7 +201,7 @@ async function deleteRecipeById(id) {
 
 async function fetchAllCategories() {
   try {
-    db = await SQLite.openDatabaseAsync("recipes.db");
+    db = await getDb();
     const rows = await db.getAllAsync(
       "SELECT id, name, image FROM categories;"
     );
@@ -161,7 +213,7 @@ async function fetchAllCategories() {
 
 async function insertCategory(name, image = DEFAULT_CATEGORY_IMAGE) {
   try {
-    db = await SQLite.openDatabaseAsync("recipes.db");
+    db = await getDb();
     const existingCategory = await db.getFirstAsync(
       "SELECT id FROM categories WHERE name = ?",
       [name]
@@ -195,7 +247,7 @@ async function insertCategory(name, image = DEFAULT_CATEGORY_IMAGE) {
 
 const deleteCategoryById = async (categoryId) => {
   try {
-    db = await SQLite.openDatabaseAsync("recipes.db");
+    db = await getDb();
     const result = await db.runAsync("DELETE FROM categories WHERE id = ?;", [
       categoryId,
     ]);
@@ -211,7 +263,7 @@ const deleteCategoryById = async (categoryId) => {
 
 const insertRecipeWithCategories = async (recipe) => {
   try {
-    db = await SQLite.openDatabaseAsync("recipes.db");
+    db = await getDb();
     let ingredientsWithUnits;
 
     // Check if ingredients are already in array format
@@ -237,25 +289,21 @@ const insertRecipeWithCategories = async (recipe) => {
 
     // const ingredientsJson = JSON.stringify(ingredientsWithUnits);
     // Set default image if not provided
-    const image = recipe.image || require("../images/recipe_placeholder.jpg");
-
-    data = {
-      title: recipe.title,
-      ingredients: JSON.stringify(recipe.ingredients),
-      instructions: JSON.stringify(recipe.instructions),
-      image: image,
-      totalTime: recipe.totalTime,
-    };
+    const image = recipe.image || null; // no photo: the UI draws a tinted placeholder
 
     // Insert recipe into recipes table
     const result = await db.runAsync(
-      "INSERT INTO recipes (title, ingredients, instructions, image, totalTime) VALUES (?, ?, ?, ?, ?);",
+      "INSERT INTO recipes (title, ingredients, instructions, image, totalTime, servings, tags, fridge_days, est_idx) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);",
       [
         recipe.title,
         JSON.stringify(recipe.ingredients),
         JSON.stringify(recipe.instructions),
         image,
         recipe.totalTime,
+        recipe.servings || 4,
+        JSON.stringify(recipe.tags || []),
+        recipe.fridgeDays ?? null,
+        JSON.stringify(recipe.estimatedIdx || []),
       ]
     );
 
@@ -285,9 +333,9 @@ const insertRecipeWithCategories = async (recipe) => {
 
 async function fetchAllRecipesWithCategories() {
   try {
-    db = await SQLite.openDatabaseAsync("recipes.db");
+    db = await getDb();
     const rows = await db.getAllAsync(`
-      SELECT r.id, r.title, r.ingredients, r.instructions, r.image, r.totalTime, GROUP_CONCAT(c.name) AS categoryNames
+      SELECT r.id, r.title, r.ingredients, r.instructions, r.image, r.totalTime, r.servings, r.tags, r.fridge_days, r.est_idx, GROUP_CONCAT(c.name) AS categoryNames
       FROM recipes r
       LEFT JOIN recipe_categories rc ON r.id = rc.recipeId
       LEFT JOIN categories c ON rc.categoryId = c.id
@@ -302,16 +350,17 @@ async function fetchAllRecipesWithCategories() {
 
 async function updateRecipeWithCategories(id, recipe, categoryIds) {
   try {
-    db = await SQLite.openDatabaseAsync("recipes.db");
+    db = await getDb();
     await db.runAsync(
       `
-      UPDATE recipes SET title = ?, ingredients = ?, instructions = ?, image = ?, totalTime = ? WHERE id = ?;`,
+      UPDATE recipes SET title = ?, ingredients = ?, instructions = ?, image = ?, totalTime = ?, servings = ? WHERE id = ?;`,
       [
         recipe.title,
         recipe.ingredients,
         recipe.instructions,
         recipe.image,
         recipe.totalTime,
+        recipe.servings || 4,
         id,
       ]
     );
@@ -334,7 +383,7 @@ async function updateRecipeWithCategories(id, recipe, categoryIds) {
 
 const fetchRecipesByCategory = async (categoryId) => {
   try {
-    db = await SQLite.openDatabaseAsync("recipes.db");
+    db = await getDb();
     const recipes = await db.getAllAsync(
       "SELECT r.* FROM recipes r JOIN recipe_categories rc ON r.id = rc.recipeId WHERE rc.categoryId = ?;",
       [categoryId]
@@ -348,7 +397,7 @@ const fetchRecipesByCategory = async (categoryId) => {
 
 const deleteRecipeFromCategory = async (recipeId, categoryId, callback) => {
   try {
-    db = await SQLite.openDatabaseAsync("recipes.db");
+    db = await getDb();
     await db.runAsync(
       "DELETE FROM recipe_categories WHERE recipeId = ? AND categoryId = ?;",
       [recipeId, categoryId]
@@ -364,7 +413,7 @@ const deleteRecipeFromCategory = async (recipeId, categoryId, callback) => {
 
 async function resetDatabase() {
   try {
-    db = await SQLite.openDatabaseAsync("recipes.db");
+    db = await getDb();
     await db.execAsync(`
       DROP TABLE IF EXISTS recipes;
       DROP TABLE IF EXISTS categories;
@@ -379,7 +428,7 @@ async function resetDatabase() {
 
 const addRecipeToCategory = async (categoryId, recipeId) => {
   try {
-    db = await SQLite.openDatabaseAsync("recipes.db");
+    db = await getDb();
     // Check if the association already exists to prevent duplicates
     const existingLink = await db.getFirstAsync(
       "SELECT * FROM recipe_categories WHERE recipeId = ? AND categoryId = ?;",
@@ -410,7 +459,7 @@ const addRecipeToCategory = async (categoryId, recipeId) => {
 
 async function fetchShoppingList() {
   try {
-    db = await SQLite.openDatabaseAsync("recipes.db");
+    db = await getDb();
     const rows = await db.getAllAsync("SELECT * FROM shopping_list;");
     return rows;
   } catch (error) {
@@ -421,12 +470,19 @@ async function fetchShoppingList() {
 
 async function saveShoppingList(list) {
   try {
-    db = await SQLite.openDatabaseAsync("recipes.db");
+    db = await getDb();
     await db.runAsync("DELETE FROM shopping_list;");
     for (const item of list) {
       await db.runAsync(
-        "INSERT INTO shopping_list (name, quantity, unit, department) VALUES (?, ?, ?, ?);",
-        [item.name, item.quantity, item.unit, item.department]
+        "INSERT INTO shopping_list (name, quantity, unit, department, checked, from_recipes) VALUES (?, ?, ?, ?, ?, ?);",
+        [
+          item.name,
+          item.quantity,
+          item.unit,
+          item.department || "אחר",
+          item.checked ? 1 : 0,
+          JSON.stringify(item.from || []),
+        ]
       );
     }
   } catch (error) {
@@ -436,7 +492,7 @@ async function saveShoppingList(list) {
 
 async function clearShoppingList() {
   try {
-    db = await SQLite.openDatabaseAsync("recipes.db");
+    db = await getDb();
     await db.runAsync("DELETE FROM shopping_list;");
   } catch (error) {
     console.error("Error clearing shopping list:", error);
@@ -445,7 +501,7 @@ async function clearShoppingList() {
 
 async function deleteShoppingListItems(ids) {
   try {
-    db = await SQLite.openDatabaseAsync("recipes.db");
+    db = await getDb();
     for (const id of ids) {
       await db.runAsync("DELETE FROM shopping_list WHERE id = ?;", [id]);
     }
@@ -456,7 +512,7 @@ async function deleteShoppingListItems(ids) {
 
 async function fetchMealPlan() {
   try {
-    db = await SQLite.openDatabaseAsync("recipes.db");
+    db = await getDb();
     const rows = await db.getAllAsync("SELECT * FROM meal_plan;");
     return rows;
   } catch (error) {
@@ -464,21 +520,54 @@ async function fetchMealPlan() {
   }
 }
 
-async function insertMealPlan(day, mealType, recipeId) {
+// `day` is an ISO date (YYYY-MM-DD). A slot holds one recipe, so replace it.
+async function insertMealPlan(day, mealType, recipeId, prepState = null) {
   try {
-    db = await SQLite.openDatabaseAsync("recipes.db");
+    db = await getDb();
+    await db.runAsync("DELETE FROM meal_plan WHERE day = ? AND meal_type = ?;", [
+      day,
+      mealType,
+    ]);
     await db.runAsync(
-      "INSERT INTO meal_plan (day, meal_type, recipe_id) VALUES (?, ?, ?);",
-      [day, mealType, recipeId]
+      "INSERT INTO meal_plan (day, meal_type, recipe_id, prep_state) VALUES (?, ?, ?, ?);",
+      [day, mealType, recipeId, prepState]
     );
   } catch (error) {
     console.error("Error inserting meal plan:", error);
   }
 }
 
+// Writes a whole plan snapshot: { "YYYY-MM-DD|meal": { id, prep } }.
+async function replaceMealPlan(plan) {
+  try {
+    db = await getDb();
+    await db.runAsync("DELETE FROM meal_plan;");
+    for (const [key, slot] of Object.entries(plan)) {
+      const [day, meal] = key.split("|");
+      await db.runAsync(
+        "INSERT INTO meal_plan (day, meal_type, recipe_id, prep_state) VALUES (?, ?, ?, ?);",
+        [day, meal, slot.id, slot.prep || null]
+      );
+    }
+  } catch (error) {
+    console.error("Error replacing meal plan:", error);
+  }
+}
+
+async function getMeta(key) {
+  db = await getDb();
+  const row = await db.getFirstAsync("SELECT value FROM app_meta WHERE key = ?;", [key]);
+  return row ? row.value : null;
+}
+
+async function setMeta(key, value) {
+  db = await getDb();
+  await db.runAsync("INSERT OR REPLACE INTO app_meta (key, value) VALUES (?, ?);", [key, String(value)]);
+}
+
 async function deleteMealPlan() {
   try {
-    db = await SQLite.openDatabaseAsync("recipes.db");
+    db = await getDb();
     await db.runAsync("DELETE FROM meal_plan;");
     console.log("Meal plan deleted successfully");
   } catch (error) {
@@ -488,7 +577,7 @@ async function deleteMealPlan() {
 
 async function deleteSpecificMeal(day, mealType) {
   try {
-    db = await SQLite.openDatabaseAsync("recipes.db");
+    db = await getDb();
     await db.runAsync(
       "DELETE FROM meal_plan WHERE day = ? AND meal_type = ?;",
       [day, mealType]
@@ -501,6 +590,10 @@ async function deleteSpecificMeal(day, mealType) {
 
 export {
   initDB,
+  getInstallId,
+  getMeta,
+  setMeta,
+  replaceMealPlan,
   fetchRecipeById,
   fetchAllRecipes,
   deleteRecipeById,
