@@ -1,42 +1,104 @@
 import React, { useEffect, useState } from "react";
 import { View, Text, ActivityIndicator, Platform } from "react-native";
 import { StatusBar } from "expo-status-bar";
-import { NavigationContainer } from "@react-navigation/native";
-import { createStackNavigator } from "@react-navigation/stack";
+import { NavigationContainer, createNavigationContainerRef } from "@react-navigation/native";
+import Constants from "expo-constants";
+import { ShareIntentProvider, useShareIntentContext } from "expo-share-intent";
+import {
+  createStackNavigator,
+  CardStyleInterpolators,
+} from "@react-navigation/stack";
+import { SafeAreaProvider } from "react-native-safe-area-context";
+import { useFonts } from "expo-font";
+import {
+  Heebo_400Regular,
+  Heebo_500Medium,
+  Heebo_600SemiBold,
+  Heebo_700Bold,
+  Heebo_900Black,
+} from "@expo-google-fonts/heebo";
 import { initDB } from "./util/database";
+import { loadShoppingList } from "./util/shopping";
+import { loadMeals } from "./util/mealSettings";
 import { I18nManager } from "react-native";
-import { AntDesign } from "@expo/vector-icons";
-import { TouchableOpacity } from "react-native";
-import AddRecipeManuallyScreen from "./screens/AddRecipeManuallyScreen";
+import EditRecipeScreen from "./screens/EditRecipeScreen";
 import RecipeDetailScreen from "./screens/RecipeDetailScreen";
-import AllRecipesScreen from "./screens/AllRecipesScreen";
-import AllCategoriesScreen from "./screens/AllCategoriesScreen";
-import CategoryRecipesScreen from "./screens/CategoryRecipesScreen";
-import AddRecipeByUrlScreen from "./screens/AddRecipeByUrlScreen";
+import CookingModeScreen from "./screens/CookingModeScreen";
+import AddRecipeScreen from "./screens/AddRecipeScreen";
 import AddCategoryScreen from "./screens/AddCategory/AddCategoryScreen";
-import AddRecipeByImageScreen from "./screens/AddRecipeByImage/AddRecipeByImageScreen";
-import ShoppingListScreen from "./screens/ShoppingListScreen";
-import MealPlanningScreen from "./screens/MealPlanningScreen";
 import SettingsScreen from "./screens/SettingsScreen";
 import MyTabs from "./components/MyTabs";
-import {
-  heightPercentageToDP,
-  widthPercentageToDP,
-} from "react-native-responsive-screen";
+import { ToastProvider } from "./components/UI/kit";
+import { C, F } from "./constants/theme";
 
 I18nManager.forceRTL(true);
 I18nManager.allowRTL(true);
 
+// forceRTL is native-only; on web the direction comes from the document.
+const RtlRoot = Platform.OS === "web" ? (props) => (
+        <View dir="rtl" style={{ flex: 1, maxWidth: 430, marginLeft: "auto", marginRight: "auto" }} {...props} />
+      ) : React.Fragment;
+if (Platform.OS === "web") {
+  document.documentElement.setAttribute("dir", "rtl");
+  document.documentElement.setAttribute("lang", "he");
+}
+
 const Stack = createStackNavigator();
+const navigationRef = createNavigationContainerRef();
+
+// Expo Go has no native share module; only a development/production build does.
+const SHARE_INTENT_OPTIONS = { disabled: Constants.appOwnership === "expo" || Platform.OS === "web" };
+
+// Opens Add Recipe with whatever another app shared (a link, or text such as a caption).
+function ShareHandler({ ready }) {
+  const { hasShareIntent, shareIntent, resetShareIntent } = useShareIntentContext();
+  useEffect(() => {
+    if (!ready || !hasShareIntent) return;
+    const link = shareIntent?.webUrl || (shareIntent?.text || "").match(/https?:\/\/\S+/)?.[0];
+    const text = shareIntent?.text?.trim();
+    if (link || text) {
+      navigationRef.navigate("AddRecipe", {
+        shared: link ? { url: link } : { text },
+        at: Date.now(),
+      });
+    }
+    resetShareIntent();
+  }, [ready, hasShareIntent, shareIntent, resetShareIntent]);
+  return null;
+}
+
+const headerOptions = {
+  headerStyle: { backgroundColor: C.paper, elevation: 0, shadowOpacity: 0 },
+  headerTintColor: C.ink,
+  headerTitleStyle: { fontFamily: F.display700, fontSize: 20 },
+  headerTitleAlign: "center",
+  headerBackButtonDisplayMode: "minimal",
+  cardStyle: { backgroundColor: C.paper },
+};
 
 export default function App() {
   const [dbInitialized, setDbInitialized] = useState(false);
-  const headerHeight = Platform.OS === "ios" ? 50 : 56;
+  const [navReady, setNavReady] = useState(false);
+  const [fontsLoaded] = useFonts({
+    Heebo_400Regular,
+    Heebo_500Medium,
+    Heebo_600SemiBold,
+    Heebo_700Bold,
+    Heebo_900Black,
+  });
 
   useEffect(() => {
     async function loadResourcesAndDataAsync() {
       try {
         await initDB();
+        // The browser preview uses an in-memory database, so start it with samples.
+        if (Platform.OS === "web" && __DEV__) {
+          const { seedSampleData } = await import("./util/devSeed");
+          const { fetchAllRecipes } = await import("./util/database");
+          if (!(await fetchAllRecipes())?.length) await seedSampleData();
+        }
+        await loadShoppingList(); // primes the cart badge
+        await loadMeals();
         setDbInitialized(true);
       } catch (e) {
         console.warn("Application setup failed:", e);
@@ -46,111 +108,82 @@ export default function App() {
     loadResourcesAndDataAsync();
   }, []);
 
-  if (!dbInitialized) {
+  if (!dbInitialized || !fontsLoaded) {
     return (
-      <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
-        <ActivityIndicator size="large" color="#4db384" />
-        <Text>טוען...</Text>
+      <View
+        style={{
+          flex: 1,
+          alignItems: "center",
+          justifyContent: "center",
+          backgroundColor: C.paper,
+        }}
+      >
+        <ActivityIndicator size="large" color={C.accent} />
+        <Text style={{ marginTop: 10, color: C.muted }}>טוען...</Text>
       </View>
     );
-  } else {
-    return (
-      <>
-        <StatusBar style="auto" />
-        <>
-          <NavigationContainer>
-            <Stack.Navigator
-              initialRouteName="Home"
-              screenOptions={{
-                headerStyle: {
-                  backgroundColor: "#fff",
-                  height: heightPercentageToDP("12%"),
-                },
-                headerTintColor: "black",
-                headerTitleStyle: {
-                  fontWeight: "bold",
-                  fontSize: widthPercentageToDP("5.2%"),
-                },
-                headerTitleAlign: "right",
-                headerBackTitleVisible: false,
-              }}
-            >
-              <Stack.Screen
-                name="Home"
-                component={MyTabs}
-                options={{ headerShown: false }}
-              />
-              <Stack.Screen
-                name="AddRecipeManually"
-                component={AddRecipeManuallyScreen}
-                options={{ title: "הוספת מתכון ידנית " }}
-              />
-              <Stack.Screen
-                name="AddRecipeByUrl"
-                component={AddRecipeByUrlScreen}
-                options={{ title: "הוספת מתכון URL" }}
-              />
-              <Stack.Screen
-                name="AddRecipeByImage"
-                component={AddRecipeByImageScreen}
-                options={{ title: "הוספת מתכון באמצעות תמונה" }}
-              />
-              <Stack.Screen
-                name="RecipeDisplay"
-                component={RecipeDetailScreen}
-                options={{ title: "", headerTransparent: true }}
-              />
-              <Stack.Screen
-                name="AllRecipes"
-                component={AllRecipesScreen}
-                options={{ title: "כל המתכונים" }}
-              />
-              <Stack.Screen
-                name="AllCategories"
-                component={AllCategoriesScreen}
-                options={({ navigation }) => ({
-                  title: "קטגוריות",
-                  headerRight: () => (
-                    <TouchableOpacity
-                      onPress={() => navigation.navigate("AddRecipeManually")}
-                      style={{ marginRight: 15 }}
-                    >
-                      <AntDesign name="pluscircle" size={28} color="black" />
-                    </TouchableOpacity>
-                  ),
-                })}
-              />
-              <Stack.Screen
-                name="CategoryRecipesScreen"
-                component={CategoryRecipesScreen}
-                options={({ route }) => ({ title: route.params.categoryName })}
-              />
-              <Stack.Screen
-                name="AddCategory"
-                component={AddCategoryScreen}
-                options={{
-                  title: "קטגוריה חדשה",
-                }}
-              />
-              <Stack.Screen
-                name="ShoppingList"
-                component={ShoppingListScreen}
-                options={{ title: "רשימת קניות" }}
-              />
-              <Stack.Screen
-                name="MealPlan"
-                component={MealPlanningScreen}
-                options={{ title: "לוח ארוחות" }}
-              />
-              <Stack.Screen
-                name="Settings"
-                component={SettingsScreen}
-                options={{ title: "הגדרות" }}
-              />
-            </Stack.Navigator>
-          </NavigationContainer>
-        </>
-      </>
-    );
   }
+
+  return (
+    <ShareIntentProvider options={SHARE_INTENT_OPTIONS}>
+    <RtlRoot>
+    <SafeAreaProvider>
+      <ToastProvider>
+        <StatusBar style="dark" />
+        <NavigationContainer ref={navigationRef} onReady={() => setNavReady(true)}>
+          <ShareHandler ready={navReady} />
+          <Stack.Navigator
+            initialRouteName="Home"
+            screenOptions={headerOptions}
+          >
+            <Stack.Screen
+              name="Home"
+              component={MyTabs}
+              options={{ headerShown: false }}
+            />
+            <Stack.Screen
+              name="RecipeDisplay"
+              component={RecipeDetailScreen}
+              options={{ headerShown: false }}
+            />
+            <Stack.Screen
+              name="CookingMode"
+              component={CookingModeScreen}
+              options={{
+                headerShown: false,
+                cardStyle: { backgroundColor: C.cookBg },
+              }}
+            />
+            <Stack.Screen
+              name="AddRecipe"
+              component={AddRecipeScreen}
+              options={{
+                headerShown: false,
+                presentation: "modal",
+                cardStyleInterpolator:
+                  CardStyleInterpolators.forModalPresentationIOS,
+              }}
+            />
+            <Stack.Screen
+              name="EditRecipe"
+              component={EditRecipeScreen}
+              options={{ headerShown: false }}
+            />
+            <Stack.Screen
+              name="AddCategory"
+              component={AddCategoryScreen}
+              options={{ title: "קטגוריה חדשה" }}
+            />
+            <Stack.Screen
+              name="Settings"
+              component={SettingsScreen}
+              options={{ title: "הגדרות" }}
+            />
+          </Stack.Navigator>
+        </NavigationContainer>
+      </ToastProvider>
+    </SafeAreaProvider>
+    </RtlRoot>
+    </ShareIntentProvider>
+  );
 }

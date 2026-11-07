@@ -1,148 +1,149 @@
-import AllRecipesScreen from "../screens/AllRecipesScreen";
-import HomeScreen from "../screens/HomeScreen";
+import React from "react";
+import { View, Text, TouchableOpacity, StyleSheet } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import ShoppingListScreen from "../screens/ShoppingListScreen";
-import MealPlanningScreen from "../screens/MealPlanningScreen";
-import AllCategoriesScreen from "../screens/AllCategoriesScreen";
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
-import { View, Platform } from "react-native";
-import {
-  widthPercentageToDP as wp,
-  heightPercentageToDP as hp,
-} from "react-native-responsive-screen";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import HomeScreen from "../screens/HomeScreen";
+import AllRecipesScreen from "../screens/AllRecipesScreen";
+import MealPlanningScreen from "../screens/MealPlanningScreen";
+import ShoppingListScreen from "../screens/ShoppingListScreen";
+import { useUncheckedCount } from "../util/shopping";
+import { C, F } from "../constants/theme";
 
 const Tab = createBottomTabNavigator();
 
-function MyTabs() {
+const TABS = {
+  "Home Screen": { label: "בית", icon: "home" },
+  "All Recipes": { label: "מתכונים", icon: "book" },
+  "Meal Plan": { label: "תכנון", icon: "calendar" },
+  "Shopping List": { label: "קניות", icon: "cart" },
+};
+
+function TabBar({ state, navigation }) {
+  const insets = useSafeAreaInsets();
+  const badge = useUncheckedCount();
+
   return (
-    <View style={{ flex: 1, backgroundColor: "#fff" }}>
-      <Tab.Navigator
-        backBehavior="initialRoute"
-        initialRouteName="Home Screen"
-        screenOptions={({ route }) => ({
-          headerStyle: {
-            backgroundColor: "#fff",
-            height: hp("10%"),
-          },
-          headerTintColor: "black",
-          headerTitleStyle: {
-            fontWeight: "bold",
-            fontSize: wp("5%"),
-          },
-          headerTitleAlign: "right",
-          headerBackTitleVisible: false,
-
-          tabBarIcon: ({ focused, color, size }) => {
-            let iconName;
-            let iconSize = wp("6.8%");
-            let customStyle = {};
-            let isHomeScreen = route.name === "Home Screen";
-
-            if (route.name === "Meal Plan") {
-              iconName = focused ? "calendar" : "calendar-outline";
-            } else if (route.name === "Shopping List") {
-              iconName = focused ? "cart" : "cart-outline";
-            } else if (route.name === "All Recipes") {
-              iconName = focused ? "book" : "book-outline";
-            } else if (route.name === "Home Screen") {
-              iconName = focused ? "home" : "home-outline";
-              iconSize = focused ? wp("8.5%") : wp("7.5%");
-              customStyle = {
-                ...Platform.select({
-                  ios: {
-                    padding: hp("0.75%"), // 6px converted to percentage based on height
-                    bottom: hp("-3.1%"), // -28px converted to percentage based on height
-                    zIndex: 10,
-                    shadowOffset: { width: 0, height: hp("-0.25%") }, // -2px converted to percentage based on height
-                    shadowOpacity: 0.2,
-                    shadowRadius: 1,
-                    width: wp("15%"), // 60px converted to percentage based on width
-                    height: wp("15%"), // 60px converted to percentage based on width
-                    alignItems: "center",
-                    justifyContent: "center",
-                    shadowColor: "#000",
-                  },
-                }),
-                backgroundColor: "white",
-                borderRadius: wp("17.5%") / 2, // Fully rounded circle
-                position: "absolute",
-              };
-            } else if (route.name === "All Categories") {
-              iconName = focused ? "grid" : "grid-outline";
-            }
-
-            return (
-              <View style={{ alignItems: "center", justifyContent: "center" }}>
-                {isHomeScreen && (
-                  <View
-                    style={{
-                      position: "absolute",
-                      bottom: 0,
-                      backgroundColor: "transparent",
-                      height: hp("3.75%"), // 30px converted to percentage based on height
-                      width: wp("15%"), // 60px converted to percentage based on width
-                      zIndex: 5,
-                      borderBottomLeftRadius: wp("17.5%") / 2, // 35px converted to percentage based on width
-                      borderBottomRightRadius: wp("17.5%") / 2, // 35px converted to percentage based on width
-                    }}
-                  />
-                )}
-                <View style={customStyle}>
-                  <Ionicons name={iconName} size={iconSize} color={color} />
+    <View
+      style={[styles.bar, { paddingBottom: Math.max(insets.bottom, 10) }]}
+    >
+      {state.routes.map((route, index) => {
+        if (route.name === "Add") {
+          return (
+            <View key={route.key} style={styles.slot}>
+              <TouchableOpacity
+                activeOpacity={0.85}
+                style={styles.addBtn}
+                onPress={() => navigation.navigate("AddRecipe")}
+              >
+                <Ionicons name="add" size={28} color={C.white} />
+              </TouchableOpacity>
+            </View>
+          );
+        }
+        const focused = state.index === index;
+        const meta = TABS[route.name];
+        const color = focused ? C.ink : C.faint;
+        return (
+          <TouchableOpacity
+            key={route.key}
+            style={styles.slot}
+            activeOpacity={0.7}
+            onPress={() => {
+              const event = navigation.emit({
+                type: "tabPress",
+                target: route.key,
+                canPreventDefault: true,
+              });
+              if (!focused && !event.defaultPrevented) {
+                navigation.navigate(route.name);
+              }
+            }}
+          >
+            <View>
+              <Ionicons
+                name={focused ? meta.icon : `${meta.icon}-outline`}
+                size={24}
+                color={color}
+              />
+              {route.name === "Shopping List" && badge > 0 && (
+                <View style={styles.badge}>
+                  <Text style={styles.badgeText}>{badge}</Text>
                 </View>
-              </View>
-            );
-          },
-          tabBarActiveTintColor: "#4CAF50", // Active icon color
-          tabBarInactiveTintColor: "gray", // Inactive icon color
-          tabBarStyle: {
-            height: hp("7.4%"), // Set the height to 60
-            paddingBottom: hp("1.6%"), // Adjust padding below text
-            paddingTop: hp("0.5%"), // Adjust padding above icons
-            paddingHorizontal: wp("2.2%"), // Add horizontal padding
-          },
-          tabBarLabelStyle: {
-            fontSize: wp("2.75%"),
-          },
-          tabBarIconStyle: {
-            marginTop: hp("0.5%"), // Add margin above icons
-          },
-        })}
-      >
-        <Tab.Screen
-          name="All Categories"
-          component={AllCategoriesScreen}
-          options={{ title: "קטגוריות" }}
-        />
-        <Tab.Screen
-          name="All Recipes"
-          component={AllRecipesScreen}
-          options={{ title: "מתכונים" }}
-        />
-        <Tab.Screen
-          name="Home Screen"
-          component={HomeScreen}
-          options={{
-            title: "",
-            tabBarLabel: "ראשי",
-            headerStyle: {
-              height: hp("5.8%"),
-            },
-          }}
-        />
-        <Tab.Screen
-          name="Shopping List"
-          component={ShoppingListScreen}
-          options={{ title: "רשימת קניות" }}
-        />
-        <Tab.Screen
-          name="Meal Plan"
-          component={MealPlanningScreen}
-          options={{ title: "לוח ארוחות" }}
-        />
-      </Tab.Navigator>
+              )}
+            </View>
+            <Text style={[styles.label, { color }]}>{meta.label}</Text>
+          </TouchableOpacity>
+        );
+      })}
     </View>
   );
 }
 
+function Placeholder() {
+  return null;
+}
+
+function MyTabs() {
+  return (
+    <Tab.Navigator
+      backBehavior="initialRoute"
+      initialRouteName="Home Screen"
+      tabBar={(props) => <TabBar {...props} />}
+      screenOptions={{ headerShown: false, sceneStyle: { backgroundColor: C.paper } }}
+    >
+      <Tab.Screen name="Home Screen" component={HomeScreen} />
+      <Tab.Screen name="All Recipes" component={AllRecipesScreen} />
+      <Tab.Screen name="Add" component={Placeholder} />
+      <Tab.Screen name="Meal Plan" component={MealPlanningScreen} />
+      <Tab.Screen name="Shopping List" component={ShoppingListScreen} />
+    </Tab.Navigator>
+  );
+}
+
 export default MyTabs;
+
+const styles = StyleSheet.create({
+  bar: {
+    flexDirection: "row",
+    backgroundColor: "rgba(250,248,243,0.97)",
+    borderTopWidth: 1,
+    borderTopColor: C.line,
+    paddingTop: 8,
+    paddingHorizontal: 10,
+  },
+  slot: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 3,
+    minHeight: 52,
+  },
+  label: { fontFamily: F.semi, fontSize: 11 },
+  addBtn: {
+    width: 52,
+    height: 52,
+    borderRadius: 18,
+    backgroundColor: C.accent,
+    alignItems: "center",
+    justifyContent: "center",
+    shadowColor: C.accent,
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.45,
+    shadowRadius: 9,
+    elevation: 6,
+  },
+  badge: {
+    position: "absolute",
+    top: -4,
+    start: 14,
+    minWidth: 18,
+    height: 18,
+    borderRadius: 9,
+    paddingHorizontal: 4,
+    backgroundColor: C.danger,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  badgeText: { color: C.white, fontFamily: F.bold, fontSize: 11 },
+});

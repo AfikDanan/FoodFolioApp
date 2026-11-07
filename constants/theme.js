@@ -1,0 +1,40 @@
+export const C = {
+  paper: "#f5f2eb",
+  card: "#fffdf9",
+  ink: "#1f221d",
+  ink2: "#2b2e28",
+  muted: "#6d7067",
+  muted2: "#4f5249",
+  faint: "#8a8c84",
+  faint2: "#a3a59c",
+  line: "#e6e1d6",
+  line2: "#eee9de",
+  line3: "#e0dacd",
+  line4: "#d6d0c2",
+  chip: "#ece7dc",
+  accent: "#2f6b46",
+  accentSoft: "#e6ece4",
+  accentSofter: "#eef1ea",
+  danger: "#c4553a",
+  warnBg: "#f6ead9",
+  warnFg: "#6b4318",
+  warnText: "#a0612a",
+  freezeBg: "#dfe8ef",
+  freezeFg: "#1f4f6e",
+  cookBg: "#171a16",
+  cookFg: "#f5f2eb",
+  scrim: "rgba(20,22,18,0.4)",
+  white: "#ffffff",
+};
+
+export const F = {
+  display500: "Heebo_500Medium",
+  display700: "Heebo_700Bold",
+  display900: "Heebo_900Black",
+  body: "Heebo_400Regular",
+  medium: "Heebo_500Medium",
+  semi: "Heebo_600SemiBold",
+  bold: "Heebo_700Bold",
+};
+
+export const SCREEN_PAD = 20;
