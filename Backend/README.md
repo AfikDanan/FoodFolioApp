@@ -16,9 +16,13 @@ app ──POST /import──▶ HTTP API (throttled) ──▶ Lambda ──▶ 
 ```json
 { "type": "url", "url": "https://…", "categories": ["קינוחים", "סלטים"] }
 { "type": "image", "image": "<base64 JPEG, ≤ 4 MB>", "categories": [] }
+{ "type": "html", "url": "https://…", "html": "<page the phone fetched>", "categories": [] }
+{ "type": "text", "text": "<pasted recipe text>", "categories": [] }
 ```
 
 `200 {"recipe": {title, servings, total_minutes, ingredients[{name, quantity, unit, department, estimated}], steps[], tags[], fridge_days, suggested_category}}`
+
+`html` is used when a site refuses server requests (HTTP 403): the app downloads the page itself and sends it. `text` carries pasted captions.
 
 `POST /substitute` takes `{ingredient, quantity, unit, recipe_title, other_ingredients[]}` and returns `{options: [{name, quantity, unit, note}]}` (at most 3, sized for the recipe amount).
 
