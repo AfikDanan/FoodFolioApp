@@ -1,185 +1,251 @@
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   View,
   Text,
-  FlatList,
-  StyleSheet,
-  Image,
-  TouchableOpacity,
-  Dimensions,
   TextInput,
+  ScrollView,
+  TouchableOpacity,
+  StyleSheet,
+  Alert,
+  Image,
 } from "react-native";
+import { Ionicons } from "@expo/vector-icons";
+import { LinearGradient } from "expo-linear-gradient";
+import { useFocusEffect } from "@react-navigation/native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import {
-  fetchAllRecipes,
-  deleteRecipeById,
-  addRecipeToCategory,
+  fetchAllRecipesWithCategories,
+  fetchAllCategories,
+  deleteCategoryById,
 } from "../util/database";
-import { Ionicons } from "react-native-vector-icons";
+import { Segmented, Chip, RecipeImage } from "../components/UI/kit";
 import getImageSource from "../util/image";
+import { C, F, SCREEN_PAD } from "../constants/theme";
 import {
-  widthPercentageToDP as wp,
-  heightPercentageToDP as hp,
-} from "react-native-responsive-screen";
+  categoryList,
+  hasPhoto,
+  parseIngredients,
+  parseJsonList,
+  recipeTimeLabel,
+  tintFor,
+} from "../util/recipeUtils";
 
-const windowWidth = Dimensions.get("window").width;
+const DEFAULT_CATEGORY = "מועדפים";
 
 function AllRecipesScreen({ navigation, route }) {
-  const { fromCategoryScreen, fromShoppingCart, categoryId, addingToCategory } =
-    route.params || {};
-  const { searchQuery: externalSearchQuery } = route.params || {};
+  const insets = useSafeAreaInsets();
+  const searchRef = useRef(null);
+  const [mode, setMode] = useState("all");
   const [recipes, setRecipes] = useState([]);
-  const [filteredRecipes, setFilteredRecipes] = useState([]);
-  const [searchQuery, setSearchQuery] = useState(externalSearchQuery || "");
-  const [selectedRecipes, setSelectedRecipes] = useState(new Set());
+  const [categories, setCategories] = useState([]);
+  const [query, setQuery] = useState("");
+  const [catFilter, setCatFilter] = useState(null);
+  const [tagFilter, setTagFilter] = useState(null);
 
-  useEffect(() => {
-    const loadRecipes = async () => {
-      try {
-        const data = await fetchAllRecipes();
-        if (data && data.length > 0) {
-          setRecipes(data);
-          filterRecipes(searchQuery, data);
-        } else {
-          console.log("No recipes found or failed to fetch recipes");
-        }
-      } catch (error) {
-        console.error("Failed to fetch recipes", error);
-      }
-    };
-
-    loadRecipes();
+  const load = useCallback(async () => {
+    const [r, c] = await Promise.all([
+      fetchAllRecipesWithCategories(),
+      fetchAllCategories(),
+    ]);
+    setRecipes(r || []);
+    setCategories(c || []);
   }, []);
 
-  const filterRecipes = (query, recipesArray) => {
-    const filtered = query
-      ? recipesArray.filter((recipe) =>
-          recipe.title.toLowerCase().includes(query.toLowerCase())
-        )
-      : recipesArray;
-    setFilteredRecipes(filtered);
-  };
-
-  useEffect(() => {
-    filterRecipes(searchQuery, recipes);
-  }, [searchQuery]);
-
-  const handleSearchInputChange = (query) => {
-    setSearchQuery(query);
-  };
-
-  const toggleRecipeSelection = (recipeId) => {
-    if (!fromCategoryScreen && !fromShoppingCart) return;
-
-    const newSet = new Set(selectedRecipes);
-    if (selectedRecipes.has(recipeId)) {
-      newSet.delete(recipeId);
-    } else {
-      newSet.add(recipeId);
-    }
-    setSelectedRecipes(new Set(newSet));
-  };
-
-  const addSelectedRecipesToCategory = async () => {
-    for (let recipeId of selectedRecipes) {
-      await addRecipeToCategory(categoryId, recipeId);
-    }
-    console.log(`Added recipes to category ${categoryId}`);
-    navigation.goBack();
-  };
-
-  const selectAllRecipes = () => {
-    if (selectedRecipes.size === recipes.length) {
-      setSelectedRecipes(new Set());
-    } else {
-      const newSelectedRecipes = new Set(recipes.map((recipe) => recipe.id));
-      setSelectedRecipes(newSelectedRecipes);
-    }
-  };
-
-  const handleFinishSelection = () => {
-    const selectedRecipesArray = Array.from(selectedRecipes);
-    navigation.navigate("ShoppingList", {
-      selectedRecipes: selectedRecipesArray,
-    });
-  };
-
-  const handleRecipePress = (recipeId) => {
-    if (fromCategoryScreen || fromShoppingCart) {
-      toggleRecipeSelection(recipeId);
-    } else {
-      navigation.navigate("RecipeDisplay", { recipeId: recipeId });
-    }
-  };
-
-  const renderItem = ({ item }) => (
-    <TouchableOpacity
-      style={styles.cardContainer}
-      onPress={() => handleRecipePress(item.id)}
-    >
-      <View style={styles.imageContainer}>
-        <Image style={styles.cardImage} source={getImageSource(item.image)} />
-        {(fromCategoryScreen || fromShoppingCart) && (
-          <View style={styles.imageOverlay} />
-        )}
-      </View>
-      <Text style={styles.cardTitle}>{item.title}</Text>
-      {(fromCategoryScreen || fromShoppingCart) &&
-        selectedRecipes.has(item.id) && (
-          <TouchableOpacity
-            style={styles.checkboxIcon}
-            onPress={() => toggleRecipeSelection(item.id)}
-          >
-            <Ionicons
-              name={
-                selectedRecipes.has(item.id)
-                  ? "checkbox-outline"
-                  : "square-outline"
-              }
-              size={30}
-              color="#ffffff"
-            />
-          </TouchableOpacity>
-        )}
-    </TouchableOpacity>
+  useFocusEffect(
+    useCallback(() => {
+      load();
+    }, [load])
   );
 
+  // Home's search box focuses the field here.
+  const focusToken = route.params?.focusSearch;
+  useEffect(() => {
+    if (focusToken) {
+      setMode("all");
+      setTimeout(() => searchRef.current?.focus(), 250);
+    }
+  }, [focusToken]);
+
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return recipes.filter((r) => {
+      if (catFilter && !categoryList(r).includes(catFilter)) return false;
+      if (tagFilter && !parseJsonList(r.tags).includes(tagFilter)) return false;
+      if (!q) return true;
+      if (r.title.toLowerCase().includes(q)) return true;
+      if (parseJsonList(r.tags).some((t) => t.toLowerCase().includes(q))) return true;
+      return parseIngredients(r.ingredients).some((i) =>
+        String(i.name || "").toLowerCase().includes(q)
+      );
+    });
+  }, [recipes, query, catFilter, tagFilter]);
+
+  const allTags = useMemo(
+    () => [...new Set(recipes.flatMap((r) => parseJsonList(r.tags)))].slice(0, 8),
+    [recipes]
+  );
+
+  const openCategory = (name) => {
+    setCatFilter(name);
+    setMode("all");
+  };
+
+  const confirmDeleteCategory = (cat) => {
+    if (cat.name === DEFAULT_CATEGORY) return;
+    Alert.alert("מחיקת קטגוריה", `למחוק את ״${cat.name}״? המתכונים עצמם יישארו.`, [
+      { text: "ביטול", style: "cancel" },
+      {
+        text: "מחיקה",
+        style: "destructive",
+        onPress: async () => {
+          await deleteCategoryById(cat.id);
+          if (catFilter === cat.name) setCatFilter(null);
+          load();
+        },
+      },
+    ]);
+  };
+
+  const categoryTile = (cat) => {
+    const inCat = recipes.filter((r) => categoryList(r).includes(cat.name));
+    const cover = hasPhoto(cat.image) ? cat.image : inCat.find((r) => hasPhoto(r.image))?.image;
+    return (
+      <TouchableOpacity
+        key={cat.id}
+        activeOpacity={0.85}
+        style={[styles.catTile, { backgroundColor: tintFor(cat.id, cat.name) }]}
+        onPress={() => openCategory(cat.name)}
+        onLongPress={() => confirmDeleteCategory(cat)}
+      >
+        {cover && (
+          <Image
+            source={getImageSource(cover)}
+            style={StyleSheet.absoluteFill}
+            resizeMode="cover"
+          />
+        )}
+        <LinearGradient
+          colors={["rgba(255,253,249,0)", "rgba(255,253,249,0.96)"]}
+          locations={[0, 0.65]}
+          style={styles.catFade}
+        >
+          <Text style={styles.catName} numberOfLines={1}>
+            {cat.name}
+          </Text>
+          <Text style={styles.catCount}>{inCat.length} מתכונים</Text>
+        </LinearGradient>
+      </TouchableOpacity>
+    );
+  };
+
   return (
-    <View style={styles.container}>
-      {fromCategoryScreen && (
-        <TextInput
-          style={styles.searchBar}
-          placeholder="חפש מתכון"
-          value={searchQuery}
-          onChangeText={handleSearchInputChange}
-        />
-      )}
-      <FlatList
-        data={filteredRecipes}
-        renderItem={renderItem}
-        keyExtractor={(item) => item.id.toString()}
-        numColumns={2}
-        contentContainerStyle={styles.listContent}
-      />
-      {(fromCategoryScreen || fromShoppingCart) && (
-        <View style={styles.bottomButtonContainer}>
-          <TouchableOpacity
-            style={styles.okButton}
-            onPress={
-              fromShoppingCart
-                ? handleFinishSelection
-                : addSelectedRecipesToCategory
-            }
-          >
-            <Text style={styles.okButtonText}>אישור</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={styles.selectAllButton}
-            onPress={selectAllRecipes}
-          >
-            <Text style={styles.selectAllButtonText}>בחר הכל</Text>
-          </TouchableOpacity>
+    <View style={styles.root}>
+      <ScrollView
+        style={{ flex: 1 }}
+        contentContainerStyle={[styles.content, { paddingTop: insets.top + 10 }]}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
+      >
+        <View style={styles.titleRow}>
+          <Text style={styles.title}>המתכונים שלי</Text>
+          <Text style={styles.count}>{recipes.length} מתכונים</Text>
         </View>
-      )}
+
+        <Segmented
+          value={mode}
+          onChange={setMode}
+          options={[
+            { key: "all", label: "כל המתכונים" },
+            { key: "cats", label: "קטגוריות" },
+          ]}
+        />
+
+        {mode === "all" ? (
+          <>
+            <View style={styles.searchBox}>
+              <Ionicons name="search" size={18} color={C.ink} />
+              <TextInput
+                ref={searchRef}
+                style={styles.input}
+                value={query}
+                onChangeText={setQuery}
+                placeholder="שם מתכון, מרכיב או תגית"
+                placeholderTextColor={C.faint}
+                returnKeyType="search"
+              />
+            </View>
+
+            {(catFilter || allTags.length > 0) && (
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                style={styles.bleed}
+                contentContainerStyle={{ paddingHorizontal: SCREEN_PAD, gap: 8 }}
+              >
+                {catFilter && (
+                  <Chip
+                    dark
+                    on
+                    label={catFilter}
+                    icon="close"
+                    onPress={() => setCatFilter(null)}
+                  />
+                )}
+                {allTags.map((t) => (
+                  <Chip
+                    key={t}
+                    label={t}
+                    on={tagFilter === t}
+                    onPress={() => setTagFilter(tagFilter === t ? null : t)}
+                  />
+                ))}
+              </ScrollView>
+            )}
+
+            {filtered.length === 0 ? (
+              <Text style={styles.emptyText}>לא נמצאו מתכונים</Text>
+            ) : (
+              <View style={styles.grid}>
+                {filtered.map((r) => (
+                  <TouchableOpacity
+                    key={r.id}
+                    activeOpacity={0.85}
+                    style={styles.card}
+                    onPress={() => navigation.navigate("RecipeDisplay", { recipeId: r.id })}
+                  >
+                    <RecipeImage recipe={r} style={styles.cardImg}>
+                      {!!recipeTimeLabel(r) && (
+                        <View style={styles.timePill}>
+                          <Ionicons name="time-outline" size={13} color={C.ink} />
+                          <Text style={styles.timeText}>{recipeTimeLabel(r)}</Text>
+                        </View>
+                      )}
+                    </RecipeImage>
+                    <Text style={styles.cardTitle} numberOfLines={2}>
+                      {r.title}
+                    </Text>
+                    {!!categoryList(r)[0] && (
+                      <Text style={styles.cardCat}>{categoryList(r)[0]}</Text>
+                    )}
+                  </TouchableOpacity>
+                ))}
+              </View>
+            )}
+          </>
+        ) : (
+          <View style={styles.catGrid}>
+            {categories.map(categoryTile)}
+            <TouchableOpacity
+              activeOpacity={0.8}
+              style={[styles.catTile, styles.catNew]}
+              onPress={() => navigation.navigate("AddCategory")}
+            >
+              <Ionicons name="add" size={26} color={C.muted} />
+              <Text style={styles.catNewText}>קטגוריה חדשה</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+      </ScrollView>
     </View>
   );
 }
@@ -187,111 +253,69 @@ function AllRecipesScreen({ navigation, route }) {
 export default AllRecipesScreen;
 
 const styles = StyleSheet.create({
-  container: {
+  root: { flex: 1, backgroundColor: C.paper },
+  content: { paddingHorizontal: SCREEN_PAD, paddingBottom: 28, gap: 14 },
+  titleRow: { flexDirection: "row", alignItems: "baseline", justifyContent: "space-between" },
+  title: { fontFamily: F.display900, fontSize: 30, color: C.ink },
+  count: { fontFamily: F.medium, fontSize: 14, color: C.muted },
+  searchBox: {
+    height: 46,
+    borderRadius: 14,
+    backgroundColor: C.card,
+    borderWidth: 1,
+    borderColor: C.line,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    paddingHorizontal: 14,
+  },
+  input: {
     flex: 1,
-    backgroundColor: "#fff",
+    fontFamily: F.body,
+    fontSize: 15,
+    color: C.ink,
   },
-  searchBar: {
-    height: hp("5%"),
-    borderWidth: 2,
-    borderColor: "#ccc",
-    borderRadius: wp("4%"),
-    width: wp("90%"),
-    paddingHorizontal: wp("2.5%"),
-    marginHorizontal: wp("2.5%"),
-    marginVertical: hp("1.5%"),
-    alignSelf: "center",
-    textAlign: "right",
-  },
-  listContent: {
-    paddingHorizontal: wp("4%"),
-  },
-  cardContainer: {
-    borderRadius: wp("4%"),
-    overflow: "hidden",
-    margin: wp("2.5%"),
-    width: wp("42.5%"),
-    backgroundColor: "#fff",
-    elevation: 5,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.25,
-    shadowRadius: 3.84,
-    position: "relative",
-  },
-  checkboxIcon: {
+  bleed: { marginHorizontal: -SCREEN_PAD, flexGrow: 0 },
+  grid: { flexDirection: "row", flexWrap: "wrap", justifyContent: "space-between", rowGap: 18 },
+  card: { width: "48%", gap: 6 },
+  cardImg: { width: "100%", aspectRatio: 1 / 1.05, borderRadius: 18 },
+  timePill: {
     position: "absolute",
-    top: hp("1%"),
-    left: wp("1%"),
-    padding: wp("2%"),
-    zIndex: 2,
+    bottom: 8,
+    end: 8,
+    height: 24,
+    borderRadius: 12,
+    paddingHorizontal: 9,
+    backgroundColor: "rgba(255,253,249,0.92)",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
   },
-  cardImage: {
-    width: "100%",
-    height: "100%",
-    resizeMode: "cover",
-  },
-  imageContainer: {
-    width: "100%",
-    height: hp("20%"),
-    overflow: "hidden",
-  },
-  imageOverlay: {
+  timeText: { fontFamily: F.semi, fontSize: 12, color: C.ink },
+  cardTitle: { fontFamily: F.semi, fontSize: 15, lineHeight: 19, color: C.ink },
+  cardCat: { fontFamily: F.body, fontSize: 12, color: C.muted, marginTop: -3 },
+  emptyText: { fontFamily: F.medium, fontSize: 15, color: C.muted, textAlign: "center", paddingVertical: 40 },
+  catGrid: { flexDirection: "row", flexWrap: "wrap", justifyContent: "space-between", rowGap: 12 },
+  catTile: { width: "48%", height: 150, borderRadius: 20, overflow: "hidden" },
+  catFade: {
     position: "absolute",
-    top: 0,
     left: 0,
     right: 0,
     bottom: 0,
-    backgroundColor: "rgba(0, 0, 0, 0.29)",
+    paddingHorizontal: 14,
+    paddingBottom: 12,
+    paddingTop: 36,
   },
-  cardTitle: {
-    fontWeight: "bold",
-    fontSize: wp("4%"),
-    color: "#000",
-    paddingVertical: hp("1%"),
-    paddingHorizontal: wp("2.4%"),
-    textAlign: "left",
-  },
-  okButton: {
-    paddingHorizontal: wp("3"),
-    marginHorizontal: wp("2.5%"),
-    paddingVertical: hp("1%"),
-    borderWidth: 2,
-    borderColor: "#4db384",
-    borderRadius: wp("5%"),
-    backgroundColor: "#FFFFFF",
-    justifyContent: "center",
-    alignItems: "center",
-    backgroundColor: "#4db384",
-  },
-  okButtonText: {
-    fontSize: wp("4.5%"),
-    fontWeight: "bold",
-    color: "white",
-  },
-  bottomButtonContainer: {
-    position: "absolute",
-    bottom: hp("2.5%"),
-    left: 0,
-    right: 0,
-    flexDirection: "row-reverse",
+  catName: { fontFamily: F.display700, fontSize: 19, color: C.ink },
+  catCount: { fontFamily: F.medium, fontSize: 12, color: C.muted },
+  catNew: {
+    borderWidth: 1.5,
+    borderStyle: "dashed",
+    borderColor: C.line4,
+    backgroundColor: "transparent",
     alignItems: "center",
     justifyContent: "center",
+    gap: 4,
   },
-  selectAllButton: {
-    paddingHorizontal: wp("3"),
-    marginHorizontal: wp("2.5%"),
-    paddingVertical: hp("1%"),
-    borderWidth: 2,
-    borderColor: "#4db384",
-    borderRadius: wp("5%"),
-    backgroundColor: "#FFFFFF",
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  selectAllButtonText: {
-    fontSize: wp("4.5%"),
-    fontWeight: "bold",
-    color: "#4db384",
-  },
+  catNewText: { fontFamily: F.semi, fontSize: 14, color: C.muted },
 });

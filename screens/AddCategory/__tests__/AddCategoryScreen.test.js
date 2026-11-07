@@ -8,14 +8,11 @@ jest.mock("../../../util/database", () => ({
   insertCategory: jest.fn(),
 }));
 
-jest.mock("react-native/Libraries/Alert/Alert", () => ({
-  alert: jest.fn(),
-}));
-
 describe("AddCategoryScreen", () => {
   let navigationMock;
 
   beforeEach(() => {
+    jest.spyOn(Alert, "alert").mockImplementation(() => {});
     navigationMock = {
       goBack: jest.fn(),
     };
