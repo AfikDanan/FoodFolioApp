@@ -1,604 +1,428 @@
-import React, {
-  useState,
-  useEffect,
-  useCallback,
-  useLayoutEffect,
-} from "react";
-import {
-  View,
-  Text,
-  StyleSheet,
-  TouchableOpacity,
-  FlatList,
-  Alert,
-  Image,
-  ScrollView,
-} from "react-native";
-import { useFocusEffect } from "@react-navigation/native";
-import { DraxProvider, DraxView } from "react-native-drax";
-import {
-  fetchAllRecipes,
-  fetchMealPlan,
-  insertMealPlan,
-  deleteMealPlan,
-  deleteSpecificMeal,
-  fetchAllCategories,
-  fetchRecipesByCategory,
-  clearShoppingList,
-} from "../util/database";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { View, Text, ScrollView, TouchableOpacity, StyleSheet } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { AntDesign } from "@expo/vector-icons";
-import getImageSource from "../util/image";
-import { daysOfWeek, mealTypes } from "../constants/recipeConstants";
-import colors from "../constants/colors";
-import {
-  widthPercentageToDP as wp,
-  heightPercentageToDP as hp,
-} from "react-native-responsive-screen";
+import { LinearGradient } from "expo-linear-gradient";
+import { useFocusEffect } from "@react-navigation/native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { fetchAllRecipesWithCategories } from "../util/database";
+import { Segmented, RecipeImage, useToast } from "../components/UI/kit";
+import RecipePickerSheet from "../components/RecipePickerSheet";
+import AutoFillSheet, { DEFAULT_FILL_OPTIONS } from "../components/AutoFillSheet";
+import BatchCooking from "../components/BatchCooking";
+import { addToShoppingList, recipeToShoppingItems } from "../util/shopping";
+import { generateFill, slotKey } from "../util/planner";
+import { useMeals } from "../util/mealSettings";
+import { loadPlan, savePlan, loadCookDay, saveCookDay } from "../util/planStore";
+import { dateKey, dayName, normalizeRecipe, nextDays, shortDate } from "../util/recipeUtils";
+import { C, F, SCREEN_PAD } from "../constants/theme";
 
-function MealPlanningScreen({ navigation }) {
+const dayLabel = (date, index) => (index === 1 ? "מחר" : dayName(date));
+
+const omit = (obj, key) => {
+  const next = { ...obj };
+  delete next[key];
+  return next;
+};
+
+function MealPlanningScreen({ navigation, route }) {
+  const insets = useSafeAreaInsets();
+  const toast = useToast();
+  const meals = useMeals();
+  const days = useMemo(() => nextDays(7), []);
+  const [mode, setMode] = useState("daily");
   const [recipes, setRecipes] = useState([]);
-  const [categories, setCategories] = useState([]);
-  const [mealPlan, setMealPlan] = useState({});
-  const [allMealPlanRecipes, setAllMealPlanRecipes] = useState([]);
-  const [selectedDayIndex, setSelectedDayIndex] = useState(0);
-  const [selectedCategoryId, setSelectedCategoryId] = useState(null);
-  const [hoveredMealType, setHoveredMealType] = useState(null);
-  const [draggedRecipe, setDraggedRecipe] = useState(null);
-  const [daysWithDates, setDaysWithDates] = useState([]);
-  const [selectedMealForDeletion, setSelectedMealForDeletion] = useState(null);
-  const [menuVisible, setMenuVisible] = useState(false);
+  const [plan, setPlan] = useState({}); // { "YYYY-MM-DD|meal": recipeId }
+  const [prep, setPrep] = useState({}); // { key: "fridge" | "freeze" }
+  const [cookDay, setCookDay] = useState("");
+  const [review, setReview] = useState(null); // { before, beforePrep, suggested, seed }
+  const [picker, setPicker] = useState(null);
+  const [fillOpen, setFillOpen] = useState(false);
+  const [fillOptions, setFillOptions] = useState(DEFAULT_FILL_OPTIONS);
 
-  useEffect(() => {
-    const loadCategories = async () => {
-      const fetchedCategories = await fetchAllCategories();
-      setCategories(fetchedCategories);
-      if (fetchedCategories.length > 0) {
-        selectCategory(fetchedCategories[0].id);
-      }
-    };
-    loadCategories();
-
-    const loadMealPlan = async () => {
-      try {
-        const data = await fetchMealPlan();
-        const formattedData = data.reduce((acc, item) => {
-          if (!acc[item.day]) {
-            acc[item.day] = {};
-          }
-          acc[item.day][item.meal_type] = item.recipe_id;
-          return acc;
-        }, {});
-        setMealPlan(formattedData);
-        const mealPlanRecipeIds = [
-          ...new Set(data.map((item) => item.recipe_id)),
-        ];
-        const mealPlanRecipes = await fetchAllRecipes();
-        setAllMealPlanRecipes(
-          mealPlanRecipes.filter((recipe) =>
-            mealPlanRecipeIds.includes(recipe.id)
-          )
-        );
-      } catch (error) {
-        console.error("Failed to fetch meal plan", error);
-      }
-    };
-
-    loadMealPlan();
-    const days = getDaysWithDates();
-    setDaysWithDates(days);
+  const load = useCallback(async () => {
+    const [rows, stored, cook] = await Promise.all([
+      fetchAllRecipesWithCategories(),
+      loadPlan(),
+      loadCookDay(),
+    ]);
+    setRecipes((rows || []).map(normalizeRecipe));
+    setPlan(stored.plan);
+    setPrep(stored.prep);
+    setCookDay(cook || "");
   }, []);
 
   useFocusEffect(
     useCallback(() => {
-      const fetchRecipes = async () => {
-        const data = await fetchAllRecipes();
-        const sortedByRecent = [...data].sort((a, b) => b.id - a.id);
-        setRecipes(sortedByRecent);
-      };
-      fetchRecipes();
-    }, [])
+      load();
+    }, [load])
   );
 
-  const getDaysWithDates = () => {
-    const today = new Date();
-    return Array.from({ length: 7 }, (_, i) => {
-      const date = new Date(today);
-      date.setDate(today.getDate() + i);
-      const dayOfWeek = daysOfWeek[date.getDay()];
-      const day = String(date.getDate()).padStart(2, "0");
-      const month = String(date.getMonth() + 1).padStart(2, "0");
-      const year = String(date.getFullYear()).slice(-2);
-      const dateString = `${day}/${month}/${year}`;
-      return `${dayOfWeek} ${dateString}`;
+  // Home's AI card opens the sheet here.
+  const fillToken = route.params?.openAutoFill;
+  useEffect(() => {
+    if (fillToken) {
+      setMode("daily");
+      setFillOpen(true);
+    }
+  }, [fillToken]);
+
+  const byId = (id) => recipes.find((r) => r.id === id);
+  const inWeek = (key) => days.some((d) => key.startsWith(dateKey(d)));
+  const slotsInWeek = 7 * meals.length;
+  // Batch cooking needs a lunch or a dinner to cover.
+  const canBatch = meals.includes("צהריים") || meals.includes("ערב");
+  const isEnabled = (key) => meals.includes(key.split("|")[1]);
+  const planned = Object.keys(plan).filter(
+    (k) => inWeek(k) && isEnabled(k) && byId(plan[k])
+  ).length;
+  const emptyCount = slotsInWeek - planned;
+
+  const commit = (nextPlan, nextPrep) => {
+    setPlan(nextPlan);
+    setPrep(nextPrep);
+    savePlan(nextPlan, nextPrep);
+  };
+
+  const assign = (recipe) => {
+    const { key, meal } = picker;
+    setPicker(null);
+    commit({ ...plan, [key]: recipe.id }, omit(prep, key));
+    toast(`${recipe.title} שובץ ל${meal}`);
+  };
+
+  const remove = (key) => commit(omit(plan, key), omit(prep, key));
+
+  const runFill = (seed, base = { plan, prep }) => {
+    const { plan: filled, suggested } = generateFill({
+      recipes,
+      plan: base.plan,
+      days,
+      options: fillOptions,
+      seed,
+      meals,
     });
+    commit(filled, base.prep);
+    setReview({ before: base.plan, beforePrep: base.prep, suggested, seed });
+    setFillOpen(false);
+    setMode("daily");
   };
 
-  const selectCategory = async (categoryId) => {
-    setSelectedCategoryId(categoryId);
-    const categoryRecipes = await fetchRecipesByCategory(categoryId);
-    setRecipes(categoryRecipes);
+  const retry = () => runFill(review.seed + 1, { plan: review.before, prep: review.beforePrep });
+  const undo = () => {
+    commit(review.before, review.beforePrep);
+    setReview(null);
   };
 
-  const renderCategory = ({ item }) => (
-    <TouchableOpacity
-      style={[
-        styles.categoryItem,
-        item.id === selectedCategoryId ? styles.selectedCategoryItem : {},
-      ]}
-      onPress={() => selectCategory(item.id)}
-    >
-      <Text
-        style={[
-          styles.categoryText,
-          item.id === selectedCategoryId ? styles.selectedCategoryText : {},
-        ]}
-      >
-        {item.name}
-      </Text>
-    </TouchableOpacity>
-  );
-
-  const renderRecipeByCategory = ({ item }) => (
-    <DraxView
-      style={styles.recipeCard}
-      draggingStyle={styles.dragging}
-      dragReleasedStyle={styles.draggingReleased}
-      dragPayload={item}
-      onDragStart={() => setDraggedRecipe(item)}
-      onDragEnd={() => setDraggedRecipe(null)}
-      longPressDelay={150}
-    >
-      <TouchableOpacity
-        onPress={() =>
-          navigation.navigate("RecipeDisplay", { recipeId: item.id })
-        }
-      >
-        <View style={{ position: "relative" }}>
-          <Image
-            source={getImageSource(item.image)}
-            style={styles.recipeImage}
-          />
-        </View>
-        <Text style={styles.recipeTitle}>{item.title}</Text>
-      </TouchableOpacity>
-    </DraxView>
-  );
-
-  const handleDrop = async (mealType) => {
-    if (!draggedRecipe) return;
-
-    const fullDayString = daysWithDates[selectedDayIndex];
-    if (!fullDayString) {
-      return;
-    }
-
-    const dayNameParts = fullDayString.split(" ");
-    if (dayNameParts.length < 2) {
-      console.error("Invalid day name extracted:", fullDayString);
-      return;
-    }
-    const dayName = dayNameParts[0] + " " + dayNameParts[1];
-
-    if (!daysOfWeek.includes(dayName)) {
-      console.error(`Invalid day name extracted: ${dayName}`);
-      return;
-    }
-
-    const newMealPlan = { ...mealPlan };
-    if (!newMealPlan[dayName]) {
-      newMealPlan[dayName] = {};
-    }
-    newMealPlan[dayName][mealType] = draggedRecipe.id;
-
-    // Save to database
-    await insertMealPlan(dayName, mealType, draggedRecipe.id);
-
-    // Update state
-    setMealPlan(newMealPlan);
-    setAllMealPlanRecipes((prevRecipes) => {
-      const recipeExists = prevRecipes.some(
-        (recipe) => recipe.id === draggedRecipe.id
-      );
-      return recipeExists ? prevRecipes : [...prevRecipes, draggedRecipe];
-    });
-    setDraggedRecipe(null);
-    setHoveredMealType(null);
-    console.log("Updated meal plan: ", newMealPlan);
+  const buildShoppingList = async () => {
+    const keys = Object.keys(plan).filter((k) => inWeek(k) && isEnabled(k) && byId(plan[k]));
+    if (!keys.length) return;
+    await addToShoppingList(keys.flatMap((k) => recipeToShoppingItems(byId(plan[k]).row)));
+    setReview(null);
+    toast(`נוספו מרכיבים מ־${keys.length} ארוחות, ממוזגים לפי מוצר`);
+    navigation.navigate("Shopping List");
   };
 
-  const handleDeleteMeal = async (mealType) => {
-    const fullDayString = daysWithDates[selectedDayIndex];
-    if (!fullDayString) {
-      return;
-    }
-
-    const dayNameParts = fullDayString.split(" ");
-    if (dayNameParts.length < 2) {
-      console.error("Invalid day name extracted:", fullDayString);
-      return;
-    }
-    const dayName = dayNameParts[0] + " " + dayNameParts[1];
-
-    await deleteSpecificMeal(dayName, mealType);
-    const newMealPlan = { ...mealPlan };
-    delete newMealPlan[dayName][mealType];
-    setMealPlan(newMealPlan);
-    setSelectedMealForDeletion(null);
+  const applyBatch = ({ plan: batchPlan, prep: batchPrep, cookKey }) => {
+    commit({ ...plan, ...batchPlan }, { ...prep, ...batchPrep });
+    setReview(null); // the batch replaces any pending suggestions
+    setCookDay(cookKey);
+    saveCookDay(cookKey);
+    setMode("daily");
+    toast(`${Object.keys(batchPlan).length} ארוחות שובצו בלוח השבוע`);
   };
 
-  const toggleSelection = (mealType) => {
-    if (selectedMealForDeletion?.mealType === mealType) {
-      setSelectedMealForDeletion(null);
-    } else {
-      setSelectedMealForDeletion({ mealType });
-    }
+  const batchShopping = async (items, count) => {
+    await addToShoppingList(items);
+    toast(`נוספו מרכיבים ל־${count} מתכונים, מוכפלים לכמות השבועית`);
+    navigation.navigate("Shopping List");
   };
 
-  const toggleMenu = () => {
-    setMenuVisible(!menuVisible);
-  };
-
-  const renderMeal = (mealType) => {
-    const fullDayString = daysWithDates[selectedDayIndex];
-    if (!fullDayString) {
-      return null;
-    }
-
-    const dayNameParts = fullDayString.split(" ");
-    if (dayNameParts.length < 2) {
-      console.error("Invalid day name extracted:", fullDayString);
-      return null;
-    }
-    const dayName = dayNameParts[0] + " " + dayNameParts[1];
-    const recipeId = mealPlan[dayName]?.[mealType];
-    const recipe = allMealPlanRecipes.find((r) => r.id === recipeId);
-    const isSelected = selectedMealForDeletion?.mealType === mealType;
-
-    return (
-      <TouchableOpacity
-        key={mealType}
-        style={[styles.mealWrapper, isSelected && styles.mealContainerSelected]}
-        onPress={() => toggleSelection(mealType)}
-      >
-        <Text style={styles.mealType}>{mealType}</Text>
-        <DraxView
-          style={[
-            styles.mealContainer,
-            hoveredMealType === mealType ? styles.mealContainerHovered : {},
-          ]}
-          receptive
-          onReceiveDragDrop={() => handleDrop(mealType)}
-          onReceiveDragEnter={() => setHoveredMealType(mealType)}
-          onReceiveDragExit={() => setHoveredMealType(null)}
-        >
-          {recipe ? (
-            <View style={styles.meal}>
-              <Image
-                source={getImageSource(recipe.image)}
-                style={styles.mealImage}
-              />
-              <Text style={styles.mealTitle}>{recipe.title}</Text>
-              {isSelected && (
-                <TouchableOpacity
-                  style={styles.deleteIcon}
-                  onPress={() => handleDeleteMeal(mealType)}
-                >
-                  <Ionicons name="trash" size={wp("5%")} color="#FF6347" />
-                </TouchableOpacity>
-              )}
-            </View>
-          ) : (
-            <View style={styles.addMealButton}>
-              <Ionicons name="add" size={wp("6%")} color="#4CAF50" />
-              <Text style={styles.addMealText}>הוסף מתכון</Text>
-            </View>
-          )}
-        </DraxView>
-      </TouchableOpacity>
-    );
-  };
-
-  const clearMealPlan = async () => {
-    await deleteMealPlan();
-    setMealPlan({});
-    Alert.alert("ניקוי לוח ארוחות", "לוח הארוחות נוקה!");
-  };
-
-  const handleNextDay = () => {
-    setSelectedDayIndex((prevIndex) => (prevIndex + 1) % daysWithDates.length);
-  };
-
-  const handlePreviousDay = () => {
-    setSelectedDayIndex(
-      (prevIndex) =>
-        (prevIndex - 1 + daysWithDates.length) % daysWithDates.length
-    );
-  };
-
-  const extractRecipeIdsFromMealPlan = () => {
-    const recipeIds = [];
-    for (const day in mealPlan) {
-      for (const mealType in mealPlan[day]) {
-        const recipeId = mealPlan[day][mealType];
-        if (recipeId && !recipeIds.includes(recipeId)) {
-          recipeIds.push(recipeId);
-        }
-      }
-    }
-    return recipeIds;
-  };
-
-  const handleCreateShoppingList = async () => {
-    const recipeIds = extractRecipeIdsFromMealPlan();
-    if (recipeIds.length > 0) {
-      await clearShoppingList();
-      navigation.navigate("ShoppingList", { selectedRecipes: recipeIds });
-    }
-  };
-
-  useLayoutEffect(() => {
-    navigation.setOptions({
-      headerRight: () => (
-        <View style={{ position: "relative" }}>
-          <TouchableOpacity
-            onPress={toggleMenu}
-            style={{ paddingRight: wp("5%") }}
-          >
-            <Ionicons
-              name="ellipsis-vertical-circle"
-              size={wp("7%")}
-              color="black"
-            />
-          </TouchableOpacity>
-          {menuVisible && (
-            <View
-              style={{
-                position: "absolute",
-                top: hp("2.8%"),
-                right: wp("10%"),
-                backgroundColor: "white",
-                borderRadius: 8,
-                paddingHorizontal: wp("2%"),
-                paddingVertical: hp("1%"),
-                shadowColor: "#000",
-                shadowOffset: { width: 0, height: 2 },
-                shadowOpacity: 0.8,
-                shadowRadius: 2,
-                elevation: 5,
-                zIndex: 1000,
-                width: wp("40%"),
-              }}
-            >
-              <TouchableOpacity
-                style={styles.menuItem}
-                onPress={handleCreateShoppingList}
-              >
-                <Text style={styles.menuText}>
-                  יצירת רשימת קניות מהלוח השבועי
-                </Text>
-              </TouchableOpacity>
-            </View>
-          )}
-        </View>
-      ),
-    });
-  }, [navigation, toggleMenu, menuVisible]);
+  const reviewCount = review ? Object.keys(review.suggested).length : 0;
 
   return (
-    <DraxProvider>
-      <ScrollView style={styles.container}>
-        <View style={styles.daySelector}>
-          <TouchableOpacity
-            onPress={handlePreviousDay}
-            style={styles.arrowButton}
-          >
-            <AntDesign name="right" size={wp("4%")} color="#2A3631" />
-          </TouchableOpacity>
-          <Text style={styles.dayText}>{daysWithDates[selectedDayIndex]}</Text>
-          <TouchableOpacity onPress={handleNextDay} style={styles.arrowButton}>
-            <AntDesign name="left" size={wp("4%")} color="#2A3631" />
-          </TouchableOpacity>
+    <View style={styles.root}>
+      <View style={[styles.head, { paddingTop: insets.top + 10 }]}>
+        <View style={styles.titleRow}>
+          <View>
+            <Text style={styles.title}>השבוע</Text>
+            <Text style={styles.subtitle}>
+              {shortDate(days[0])}–{shortDate(days[6])} · {planned} מתוך {slotsInWeek} ארוחות
+            </Text>
+          </View>
+          {mode === "daily" && (
+            <TouchableOpacity style={styles.aiBtn} onPress={() => setFillOpen(true)}>
+              <Text style={styles.aiBtnText}>✦ מילוי אוטומטי</Text>
+            </TouchableOpacity>
+          )}
         </View>
-        <View style={styles.listsContainer}>
-          <FlatList
-            horizontal
-            data={categories}
-            renderItem={renderCategory}
-            keyExtractor={(item) => item.id.toString()}
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.categoriesList}
+        {canBatch && (
+          <Segmented
+            value={mode}
+            onChange={setMode}
+            options={[
+              { key: "daily", label: "לפי ימים", icon: "calendar-outline" },
+              { key: "prep", label: "בישול מרוכז", icon: "flame-outline" },
+            ]}
           />
-          <DraxView style={styles.recipeList}>
-            <FlatList
-              horizontal
-              data={recipes}
-              renderItem={renderRecipeByCategory}
-              keyExtractor={(item) => item.id.toString()}
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={styles.categoryRecipesList}
-            />
-          </DraxView>
-        </View>
+        )}
+      </View>
 
-        <View style={styles.mealsContainer}>
-          {mealTypes.map((mealType) => renderMeal(mealType))}
-        </View>
-        <TouchableOpacity style={styles.clearButton} onPress={clearMealPlan}>
-          <Text style={styles.clearButtonText}>ניקוי הלוח השבועי</Text>
-        </TouchableOpacity>
-      </ScrollView>
-    </DraxProvider>
+      {mode === "prep" && canBatch ? (
+        <BatchCooking
+          recipes={recipes}
+          days={days}
+          onApply={applyBatch}
+          onShopping={batchShopping}
+          toast={toast}
+          meals={meals}
+        />
+      ) : (
+        <>
+          <ScrollView
+            style={{ flex: 1 }}
+            contentContainerStyle={styles.content}
+            showsVerticalScrollIndicator={false}
+          >
+            {review && (
+              <View style={styles.banner}>
+                <Text style={styles.bannerText}>
+                  ✦ שובצו {reviewCount} ארוחות מתוך המתכונים שלך. המסומנות במסגרת הן ההצעות.
+                </Text>
+                <View style={styles.bannerBtns}>
+                  <TouchableOpacity style={styles.bLight} onPress={() => setReview(null)}>
+                    <Text style={styles.bLightText}>אישור</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity style={styles.bOutline} onPress={retry}>
+                    <Text style={styles.bOutlineText}>הצעה אחרת</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity style={styles.bText} onPress={undo}>
+                    <Text style={styles.bTextText}>ביטול</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            )}
+
+            {days.map((date, i) => (
+              <View key={dateKey(date)} style={[styles.dayCard, i === 0 && styles.today]}>
+                <View style={styles.dayHeader}>
+                  <Text style={styles.dayName}>{dayLabel(date, i)}</Text>
+                  <Text style={styles.dayDate}>{shortDate(date)}</Text>
+                  {i === 0 && (
+                    <View style={styles.todayBadge}>
+                      <Text style={styles.todayBadgeText}>היום</Text>
+                    </View>
+                  )}
+                  {cookDay === dateKey(date) && (
+                    <View style={styles.cookBadge}>
+                      <Ionicons name="flame" size={12} color={C.white} />
+                      <Text style={styles.cookBadgeText}>יום בישול</Text>
+                    </View>
+                  )}
+                </View>
+                {meals.map((meal) => {
+                  const key = slotKey(date, meal);
+                  const r = byId(plan[key]);
+                  const ai = !!review?.suggested[key];
+                  const tag = prep[key];
+                  return (
+                    <View key={meal} style={styles.slotRow}>
+                      <Text style={styles.mealLabel}>{meal}</Text>
+                      {r ? (
+                        <>
+                          <TouchableOpacity
+                            activeOpacity={0.7}
+                            style={[
+                              styles.filled,
+                              {
+                                borderWidth: ai ? 1.5 : 1,
+                                borderColor: ai ? C.accent : "transparent",
+                                backgroundColor: ai ? C.accentSofter : C.paper,
+                              },
+                            ]}
+                            onPress={() => navigation.navigate("RecipeDisplay", { recipeId: r.id })}
+                          >
+                            <RecipeImage recipe={r} style={styles.thumb} />
+                            <Text style={styles.filledTitle} numberOfLines={1}>
+                              {r.title}
+                            </Text>
+                            {ai && <Text style={styles.sparkle}>✦</Text>}
+                            {!!tag && (
+                              <View style={styles.prepTag}>
+                                <Ionicons
+                                  name={tag === "freeze" ? "snow-outline" : "cube-outline"}
+                                  size={14}
+                                  color={tag === "freeze" ? C.freezeFg : C.muted}
+                                />
+                                <Text
+                                  style={[
+                                    styles.prepText,
+                                    { color: tag === "freeze" ? C.freezeFg : C.muted },
+                                  ]}
+                                >
+                                  {tag === "freeze" ? "מקפיא" : "מוכן"}
+                                </Text>
+                              </View>
+                            )}
+                          </TouchableOpacity>
+                          <TouchableOpacity style={styles.remove} onPress={() => remove(key)}>
+                            <Ionicons name="close" size={18} color={C.faint2} />
+                          </TouchableOpacity>
+                        </>
+                      ) : (
+                        <TouchableOpacity
+                          activeOpacity={0.7}
+                          style={styles.emptySlot}
+                          onPress={() =>
+                            setPicker({
+                              key,
+                              meal,
+                              label: `${meal} · ${i === 0 ? "היום" : dayName(date)}`,
+                            })
+                          }
+                        >
+                          <Text style={styles.emptyText}>+ הוספה</Text>
+                        </TouchableOpacity>
+                      )}
+                    </View>
+                  );
+                })}
+                <View style={{ height: 7 }} />
+              </View>
+            ))}
+          </ScrollView>
+
+          <LinearGradient
+            colors={["rgba(245,242,235,0)", C.paper]}
+            locations={[0, 0.3]}
+            style={styles.ctaWrap}
+            pointerEvents="box-none"
+          >
+            <TouchableOpacity
+              activeOpacity={0.9}
+              style={[styles.cta, { opacity: planned ? 1 : 0.4 }]}
+              onPress={buildShoppingList}
+            >
+              <Ionicons name="cart-outline" size={19} color={C.white} />
+              <Text style={styles.ctaText}>רשימת קניות מ־{planned} ארוחות</Text>
+            </TouchableOpacity>
+          </LinearGradient>
+        </>
+      )}
+
+      <RecipePickerSheet
+        visible={!!picker}
+        title={picker?.label || ""}
+        recipes={recipes.map((r) => ({ ...r.row, id: r.id }))}
+        onPick={(row) => assign(byId(row.id))}
+        onClose={() => setPicker(null)}
+      />
+      <AutoFillSheet
+        visible={fillOpen}
+        onClose={() => setFillOpen(false)}
+        recipeCount={recipes.length}
+        emptyCount={emptyCount}
+        options={fillOptions}
+        onChange={setFillOptions}
+        onGenerate={() => runFill((review?.seed ?? 0) + (emptyCount ? 0 : 1))}
+      />
+    </View>
   );
 }
 
 export default MealPlanningScreen;
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: "#fff",
-  },
-  daySelector: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginVertical: hp("2%"),
-    alignSelf: "center",
-    position: "relative",
-    zIndex: 10,
-  },
-  arrowButton: {
-    paddingHorizontal: wp("10%"),
-  },
-  dayText: {
-    fontSize: wp("4.5%"),
-    fontWeight: "bold",
-    color: "#2A3631",
-  },
-  mealsContainer: {
-    flex: 1,
-    flexDirection: "row",
-    flexWrap: "wrap",
-    justifyContent: "space-between",
-    marginHorizontal: wp("5%"),
-  },
-  mealWrapper: {
-    width: wp("43%"),
-  },
-  mealContainer: {
+  root: { flex: 1, backgroundColor: C.paper },
+  head: { paddingHorizontal: SCREEN_PAD, gap: 14, paddingBottom: 14 },
+  titleRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-end" },
+  title: { fontFamily: F.display900, fontSize: 30, color: C.ink },
+  subtitle: { fontFamily: F.medium, fontSize: 14, color: C.muted },
+  aiBtn: {
+    height: 38,
+    paddingHorizontal: 14,
+    borderRadius: 19,
+    backgroundColor: C.accent,
     justifyContent: "center",
-    alignItems: "center",
-    marginBottom: hp("2%"),
-    paddingHorizontal: wp("5%"),
-    paddingVertical: hp("1%"),
+  },
+  aiBtnText: { fontFamily: F.semi, fontSize: 14, color: C.white },
+  content: { paddingHorizontal: SCREEN_PAD, paddingBottom: 110, gap: 14 },
+  banner: { backgroundColor: C.ink, borderRadius: 16, paddingVertical: 14, paddingHorizontal: 16, gap: 12 },
+  bannerText: { fontFamily: F.medium, fontSize: 14, lineHeight: 20, color: C.white },
+  bannerBtns: { flexDirection: "row", gap: 8 },
+  bLight: { height: 34, paddingHorizontal: 14, borderRadius: 17, backgroundColor: C.card, justifyContent: "center" },
+  bLightText: { fontFamily: F.semi, fontSize: 13, color: C.ink },
+  bOutline: {
+    height: 34,
+    paddingHorizontal: 14,
+    borderRadius: 17,
     borderWidth: 1,
-    borderColor: "#ccc",
-    alignContent: "center",
-    borderRadius: wp("2.5%"),
-    height: hp("20%"),
+    borderColor: "rgba(255,255,255,0.35)",
+    justifyContent: "center",
   },
-  mealContainerHovered: {
-    backgroundColor: "rgba(0, 0, 0, 0.2)",
+  bOutlineText: { fontFamily: F.semi, fontSize: 13, color: C.white },
+  bText: { height: 34, paddingHorizontal: 14, justifyContent: "center" },
+  bTextText: { fontFamily: F.semi, fontSize: 13, color: "rgba(255,255,255,0.75)" },
+  dayCard: { backgroundColor: C.card, borderRadius: 18, borderWidth: 1, borderColor: C.line, overflow: "hidden" },
+  today: { borderWidth: 1.5, borderColor: C.accent },
+  dayHeader: {
+    flexDirection: "row",
+    alignItems: "baseline",
+    gap: 8,
+    paddingTop: 12,
+    paddingHorizontal: 14,
+    paddingBottom: 6,
   },
-  mealImage: {
-    aspectRatio: 1,
-    height: hp("13%"),
-    borderRadius: wp("2.5%"),
-    marginTop: hp("1%"),
-    alignSelf: "center",
-  },
-  mealTitle: {
-    fontSize: wp("3.5%"),
-    fontWeight: "bold",
-    textAlign: "center",
-    color: "#666",
-    paddingVertical: hp("1%"),
-  },
-  mealType: {
-    color: "#4d4c4c",
-    fontSize: wp("4%"),
-    textAlign: "center",
-    paddingBottom: hp("1%"),
-    paddingLeft: wp("1%"),
-    fontWeight: "bold",
-  },
-  addMealButton: {
-    position: "absolute",
+  dayName: { fontFamily: F.display700, fontSize: 17, color: C.ink },
+  dayDate: { fontFamily: F.medium, fontSize: 13, color: C.muted },
+  todayBadge: { backgroundColor: C.accentSoft, borderRadius: 9, paddingHorizontal: 8, paddingVertical: 2 },
+  todayBadgeText: { fontFamily: F.semi, fontSize: 11, color: C.accent },
+  cookBadge: {
+    flexDirection: "row",
     alignItems: "center",
+    gap: 4,
+    backgroundColor: C.ink,
+    borderRadius: 9,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
   },
-  addMealText: {
-    marginTop: hp("0.5%"),
-    color: colors.secondaryGreen,
-    alignContent: "center",
+  cookBadgeText: { fontFamily: F.semi, fontSize: 11, color: C.white },
+  slotRow: { flexDirection: "row", alignItems: "center", gap: 10, paddingVertical: 7, paddingStart: 14, paddingEnd: 10 },
+  mealLabel: { width: 58, fontFamily: F.medium, fontSize: 13, color: C.muted },
+  filled: { flex: 1, flexDirection: "row", alignItems: "center", gap: 10, padding: 4, borderRadius: 12, minWidth: 0 },
+  thumb: { width: 34, height: 34, borderRadius: 9 },
+  filledTitle: { flex: 1, fontFamily: F.semi, fontSize: 14, color: C.ink },
+  sparkle: { color: C.accent, fontSize: 13 },
+  prepTag: { flexDirection: "row", alignItems: "center", gap: 3, paddingEnd: 4 },
+  prepText: { fontFamily: F.medium, fontSize: 11 },
+  remove: { width: 30, height: 30, alignItems: "center", justifyContent: "center" },
+  emptySlot: {
+    flex: 1,
+    height: 42,
+    borderRadius: 12,
+    borderWidth: 1.5,
+    borderStyle: "dashed",
+    borderColor: "#ddd7ca",
+    justifyContent: "center",
+    paddingHorizontal: 12,
   },
-
-  clearButton: {
-    marginBottom: hp("2%"),
-    padding: wp("3%"),
-    backgroundColor: "#ff6347",
-    borderRadius: wp("10%"),
-    width: wp("40%"),
-    alignSelf: "center",
-  },
-  clearButtonText: {
-    color: "#fff",
-    fontWeight: "bold",
-    textAlign: "center",
-  },
-  recipeCard: {
-    width: wp("40%"),
-    marginRight: wp("5%"),
-    borderRadius: wp("2%"),
-    overflow: "hidden",
-  },
-  recipeImage: {
-    width: "100%",
-    height: hp("15%"),
-    borderRadius: wp("2%"),
-  },
-  recipeTitle: {
-    fontSize: wp("4%"),
-    fontWeight: "bold",
-    marginTop: hp("1%"),
-    textAlign: "left",
-  },
-  categoriesList: {
-    alignItems: "center",
-    marginBottom: hp("2%"),
-  },
-  categoryItem: {
-    backgroundColor: "white",
-    paddingHorizontal: wp("2%"),
-    paddingVertical: hp("1%"),
-    borderRadius: wp("2%"),
-    borderWidth: 1,
-    borderColor: "#ebeeec",
-    marginHorizontal: wp("1%"),
-  },
-  categoryText: {
-    color: "#acacac",
-    fontSize: wp("3.5%"),
-  },
-  selectedCategoryItem: {
-    backgroundColor: colors.secondaryGreen,
-    borderColor: colors.secondaryGreen,
-  },
-  selectedCategoryText: {
-    color: "white",
-    fontWeight: "bold",
-  },
-  listsContainer: {
-    paddingHorizontal: wp("2%"),
-    paddingVertical: hp("2%"),
-    marginHorizontal: wp("2%"),
-    marginBottom: hp("2%"),
-    // backgroundColor: "#F8F9F8",
-    zIndex: 0,
-  },
-  recipeList: {},
-  dragging: {
-    width: wp("40%"),
-    height: hp("20%"),
-    opacity: 0.3,
-  },
-  draggingReleased: {
-    opacity: 1,
-  },
-  deleteIcon: {
+  emptyText: { fontFamily: F.medium, fontSize: 14, color: C.faint },
+  ctaWrap: {
     position: "absolute",
-    top: hp("2%"),
-    right: wp("2%"),
-    backgroundColor: "rgba(255, 255, 255, 0.7)",
-    borderRadius: wp("2%"),
-    padding: wp("2%"),
+    left: 0,
+    right: 0,
+    bottom: 0,
+    paddingTop: 28,
+    paddingHorizontal: SCREEN_PAD,
+    paddingBottom: 14,
   },
-
-  menuItem: {
-    paddingVertical: hp("1%"),
+  cta: {
+    height: 52,
+    borderRadius: 16,
+    backgroundColor: C.ink,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 10,
   },
-  menuText: {
-    fontSize: wp("4%"),
-    color: "black",
-    textAlign: "center",
-  },
+  ctaText: { fontFamily: F.semi, fontSize: 15, color: C.white },
 });
