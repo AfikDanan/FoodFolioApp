@@ -58,7 +58,7 @@ function ShareHandler({ ready }) {
     const text = shareIntent?.text?.trim();
     if (link || text) {
       navigationRef.navigate("AddRecipe", {
-        shared: link ? { url: link } : { text },
+        shared: link ? { url: link, text } : { text },
         at: Date.now(),
       });
     }

@@ -7,8 +7,8 @@ from urllib.parse import urlsplit
 
 from . import llm
 from .config import get_settings
-from .errors import bad_request, not_a_recipe
-from .extract import page_to_model_input
+from .errors import bad_request, no_caption, not_a_recipe
+from .extract import page_caption, page_to_model_input
 from .fetch import fetch_html
 from .schemas import (
     APP_UNIT,
@@ -30,6 +30,14 @@ MAX_MINUTES = 3 * 24 * 60  # a three-day ferment is the longest we believe
 _STEP_NUMBER = re.compile(r"^\s*(?:\d+\s*[.)]|[-•*])\s*")
 
 
+_SOCIAL_HOSTS = ("instagram.com", "tiktok.com")
+
+
+def _is_social_host(url: str) -> bool:
+    host = (urlsplit(url).hostname or "").lower()
+    return any(host == h or host.endswith("." + h) for h in _SOCIAL_HOSTS)
+
+
 def import_recipe(request: ImportRequest) -> Recipe:
     settings = get_settings()
     if isinstance(request, UrlImport | HtmlImport):
@@ -39,6 +47,9 @@ def import_recipe(request: ImportRequest) -> Recipe:
             )
         else:
             html = request.html
+        if _is_social_host(request.url) and not page_caption(html).strip():
+            # Login-walled shell (Instagram, or a TikTok that hid the post): nothing to read.
+            raise no_caption()
         text = page_to_model_input(html, settings.max_page_chars)
         if not text.strip():
             raise not_a_recipe()

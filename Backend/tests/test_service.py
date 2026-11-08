@@ -211,3 +211,14 @@ def test_pasted_text_goes_straight_to_the_model(monkeypatch):
     monkeypatch.setattr(service.llm, "extract_recipe", fake_extract)
     service.import_recipe(TextImport(type="text", text="מרכיבים: 2 כוסות קמח. מערבבים ואופים."))
     assert seen["text"].startswith("מרכיבים") and seen["image"] is None
+
+
+def test_social_link_without_caption_asks_for_pasted_text(monkeypatch):
+    monkeypatch.setattr(
+        service, "fetch_html", lambda url, **kw: "<html><title>Instagram</title></html>"
+    )
+    with pytest.raises(ApiError) as err:
+        service.import_recipe(
+            UrlImport(type="url", url="https://www.instagram.com/reel/abc/", categories=[])
+        )
+    assert err.value.code == "no_caption"

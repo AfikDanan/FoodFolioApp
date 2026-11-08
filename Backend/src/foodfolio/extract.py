@@ -8,6 +8,7 @@ module has no per-site knowledge and nothing to maintain when a site redesigns.
 
 import json
 import re
+from html import unescape
 from html.parser import HTMLParser
 
 _SKIP_TAGS = {
@@ -113,10 +114,61 @@ def visible_text(html: str, limit: int) -> str:
     return "\n".join(line for line in lines if line)[:limit]
 
 
+_META_RE = re.compile(r"<meta\b[^>]*>", re.IGNORECASE)
+_ATTR_RE = re.compile(r'([\w:-]+)\s*=\s*(?:"([^"]*)"|\'([^\']*)\')')
+_CAPTION_META = ("og:title", "og:description", "twitter:description", "description")
+_REHYDRATION_RE = re.compile(
+    r'<script[^>]+id=["\']__UNIVERSAL_DATA_FOR_REHYDRATION__["\'][^>]*>(.*?)</script>',
+    re.DOTALL | re.IGNORECASE,
+)
+
+
+def _find_key(node, key: str) -> str | None:
+    """First non-empty string stored under `key` anywhere in parsed JSON."""
+    if isinstance(node, dict):
+        value = node.get(key)
+        if isinstance(value, str) and value.strip():
+            return value
+        node = list(node.values())
+    if isinstance(node, list):
+        for item in node:
+            found = _find_key(item, key)
+            if found:
+                return found
+    return None
+
+
+def page_caption(html: str) -> str:
+    """The post caption of a social-media page.
+
+    TikTok/Instagram render client side, so the visible text is empty; the caption
+    lives in meta tags and, for TikTok, in an embedded JSON state blob (script tags
+    are skipped by `visible_text`, so it has to be read separately).
+    """
+    parts: list[str] = []
+    for tag in _META_RE.findall(html):
+        attrs = {m[0].lower(): m[1] or m[2] for m in _ATTR_RE.findall(tag)}
+        name = (attrs.get("property") or attrs.get("name") or "").lower()
+        content = unescape(attrs.get("content", "")).strip()
+        if name in _CAPTION_META and content and content not in parts:
+            parts.append(content)
+    state = _REHYDRATION_RE.search(html)
+    if state:
+        try:
+            desc = _find_key(json.loads(state.group(1)), "desc")
+        except json.JSONDecodeError:
+            desc = None
+        if desc and desc.strip() not in parts:
+            parts.append(desc.strip())
+    return "\n".join(parts)
+
+
 def page_to_model_input(html: str, limit: int) -> str:
     """Text to send to the model for a fetched page."""
     recipe = find_jsonld_recipe(html)
     if recipe and recipe.get("recipeIngredient") and recipe.get("recipeInstructions"):
         slim = {key: recipe[key] for key in _RECIPE_KEYS if key in recipe}
         return json.dumps(slim, ensure_ascii=False)[:limit]
-    return visible_text(html, limit)
+    caption = page_caption(html)
+    text = visible_text(html, limit)
+    return f"{caption}\n\n{text}".strip()[:limit] if caption else text
