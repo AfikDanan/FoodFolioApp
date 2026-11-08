@@ -30,6 +30,10 @@ import {
 } from "../util/recipeUtils";
 import { RoundButton, Segmented, Chip, DepartmentIcon, useToast } from "../components/UI/kit";
 import { C, F, SCREEN_PAD } from "../constants/theme";
+import { READ_INSTAGRAM_IN_WEBVIEW } from "../constants/config";
+
+// Loaded only when the feature is on, so switching the flag off never touches the native module.
+const CaptionReader = READ_INSTAGRAM_IN_WEBVIEW ? require("../components/CaptionReader").default : null;
 
 const STAGES = [
   "קורא את התוכן",
@@ -43,6 +47,10 @@ const TITLES = { form: "מתכון חדש", importing: "רגע…", review: "ב�
 const ERRORS = {
   "no-recipe": { title: "לא זוהה מתכון", sub: "אפשר לנסות שוב, או להזין את המתכון ידנית." },
   "rate-limited": { title: "הגעתם למגבלת הייבוא להיום", sub: "אפשר להזין את המתכון ידנית, או לנסות שוב מחר." },
+  "no-caption": {
+    title: "לא הצלחנו לקרוא את הפוסט",
+    sub: "אינסטגרם וטיקטוק לא חושפים את הטקסט בקישור. העתיקו את הכיתוב של הפוסט והדביקו אותו בלשונית הקישור.",
+  },
   "fetch-blocked": {
     title: "האתר לא מאפשר קריאה אוטומטית",
     sub: "אפשר להעתיק את טקסט המתכון מהאתר ולהדביק אותו כאן, או לצלם מסך ולייבא כתמונה.",
@@ -71,6 +79,30 @@ function AddRecipeScreen({ navigation, route }) {
   const [categoriesLoaded, setCategoriesLoaded] = useState(false);
   const handledShare = useRef(null);
 
+  // Instagram hides captions from the server: when the API says so, read the post in a
+  // hidden WebView on the phone and import that text instead (see CaptionReader).
+  const [readerUrl, setReaderUrl] = useState(null);
+  const readerDone = useRef(null);
+  const readCaption = (u) =>
+    new Promise((resolve) => {
+      readerDone.current = resolve;
+      setReaderUrl(u);
+    });
+  const finishReader = (text) => {
+    setReaderUrl(null);
+    readerDone.current?.(text);
+    readerDone.current = null;
+  };
+  const importLink = async (link, names) => {
+    // Instagram never shows a server its caption, so read it on the phone first. Detecting
+    // the host here (not from an API error) also works against an API not yet redeployed.
+    if (CaptionReader && /^https?:\/\/([\w-]+\.)?instagram\.com\//i.test(link)) {
+      const caption = await readCaption(link);
+      if (caption) return importFromText(caption, names);
+    }
+    return importFromUrl(link, names);
+  };
+
   useEffect(() => {
     fetchAllCategories().then((c) => {
       setCategories(c || []);
@@ -89,7 +121,18 @@ function AddRecipeScreen({ navigation, route }) {
     if (shared.url) {
       setTab("link");
       setUrl(shared.url);
-      runImport(() => importFromUrl(shared.url, names));
+      // A caption shared along with the link (text minus the link) beats a login-walled page.
+      const caption = (shared.text || "").replace(shared.url, "").trim();
+      runImport(async () => {
+        try {
+          return await importLink(shared.url, names);
+        } catch (e) {
+          if (caption.length >= 40 && ["no-caption", "no-recipe", "fetch-blocked"].includes(e.code)) {
+            return importFromText(caption, names);
+          }
+          throw e;
+        }
+      });
     } else if (shared.text.length >= 20) {
       setTab("link");
       setPasted(shared.text);
@@ -130,7 +173,7 @@ function AddRecipeScreen({ navigation, route }) {
     if (tab === "link") {
       const names = categories.map((c) => c.name);
       runImport(() =>
-        url.trim() ? importFromUrl(url.trim(), names) : importFromText(pasted, names)
+        url.trim() ? importLink(url.trim(), names) : importFromText(pasted, names)
       );
     } else if (tab === "photo") {
       runImport(() => importFromImage(photo, categories.map((c) => c.name)));
@@ -209,6 +252,7 @@ function AddRecipeScreen({ navigation, route }) {
         <Text style={styles.title}>{TITLES[phase]}</Text>
         <RoundButton icon="close" onPress={() => navigation.goBack()} />
       </View>
+      {readerUrl && CaptionReader ? <CaptionReader url={readerUrl} onDone={finishReader} /> : null}
 
       {phase === "form" && (
         <>
