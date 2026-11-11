@@ -122,11 +122,14 @@ def never(*a, **kw):
 
 def test_social_link_combines_shared_text_caption_and_page(monkeypatch, model):
     monkeypatch.setattr(service, "fetch_caption", lambda url: "קפטן: 2 כוסות קמח")
-    monkeypatch.setattr(service, "fetch_html", lambda url, **kw: "<p>גוף הדף</p>")
+    monkeypatch.setattr(
+        service, "fetch_html", lambda url, **kw: "<p>גוף הדף עם מצרכים והוראות הכנה</p>"
+    )
     url = "https://www.instagram.com/reel/C1abc/"
     service.import_recipe(UrlImport(type="url", url=url, text=f"עוגה טעימה {url}"))
     assert model["text"] == (
-        "Shared text:\nעוגה טעימה\n\nPost caption:\nקפטן: 2 כוסות קמח\n\nPage:\nגוף הדף"
+        "Shared text:\nעוגה טעימה\n\nPost caption:\nקפטן: 2 כוסות קמח"
+        "\n\nPage:\nגוף הדף עם מצרכים והוראות הכנה"
     )
 
 
@@ -182,10 +185,12 @@ def test_social_link_falls_back_to_page_preview(monkeypatch, model):
     monkeypatch.setattr(
         service,
         "fetch_html",
-        lambda url, **kw: '<meta property="og:description" content="מתכון: קמח"><p>Log in</p>',
+        lambda url, **kw: (
+            '<meta property="og:description" content="מתכון: קמח, ביצים וסוכר"><p>Log in</p>'
+        ),
     )
     service.import_recipe(UrlImport(type="url", url="https://www.instagram.com/p/C1abc/"))
-    assert model["text"] == "מתכון: קמח\n\nLog in"
+    assert model["text"] == "מתכון: קמח, ביצים וסוכר\n\nLog in"
 
 
 def test_blocked_site_still_imports_from_shared_text(monkeypatch, model):
@@ -216,3 +221,17 @@ def test_phone_page_is_combined_with_shared_text(monkeypatch, model):
         HtmlImport(type="html", url="https://www.instagram.com/p/x/", html=html, text="קפשן")
     )
     assert model["text"].startswith("Shared text:\nקפשן\n\nPage:\nעוגה")
+
+
+def test_social_login_wall_asks_for_screenshots_instead_of_calling_the_model(monkeypatch, model):
+    # Seen live: Instagram serves its error page (HTTP 200) to logged-out readers,
+    # whose text is just "Instagram".
+    monkeypatch.setattr(service, "fetch_caption", lambda url: "")
+    monkeypatch.setattr(
+        service,
+        "fetch_html",
+        lambda url, **kw: "<html><head><title>Instagram</title></head></html>",
+    )
+    with pytest.raises(ApiError) as err:
+        service.import_recipe(UrlImport(type="url", url="https://www.instagram.com/reel/C1abc/"))
+    assert err.value.code == "caption_needed" and "text" not in model

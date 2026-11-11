@@ -28,6 +28,7 @@ from .social import caption_from_page, fetch_caption
 from .social import platform as social_platform
 
 MAX_INGREDIENTS = 80
+MIN_SOCIAL_PAGE_CHARS = 25  # "Instagram" alone is a login wall or error page
 MAX_STEPS = 60
 MAX_TAGS = 5
 MAX_MINUTES = 3 * 24 * 60  # a three-day ferment is the longest we believe
@@ -82,6 +83,10 @@ def _link_text(request: UrlImport | HtmlImport, limit: int) -> str:
 
     page_text = page_to_model_input(html, limit) if html else ""
     page_caption = caption_from_page(html, social) if html and social else ""
+    if social and len(page_text.strip()) < MIN_SOCIAL_PAGE_CHARS:
+        # A login wall or error page ("Instagram"): not worth a model call, and
+        # the person should be asked for screenshots instead.
+        page_text = ""
 
     parts = []
     for label, value in (
