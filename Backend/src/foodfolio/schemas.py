@@ -120,6 +120,15 @@ class TextImport(BaseModel):
     )
 
 
+class PdfImport(BaseModel):
+    """A PDF shared into the app: FoodFolio's own recipe book, or any recipe PDF."""
+
+    pdf: Annotated[str, Field(min_length=100, max_length=6_000_000)]  # base64
+    categories: list[Annotated[str, Field(max_length=40)]] = Field(
+        default_factory=list, max_length=30
+    )
+
+
 ImportRequest = Annotated[
     UrlImport | ImageImport | HtmlImport | TextImport, Field(discriminator="type")
 ]
@@ -143,6 +152,9 @@ class Recipe(BaseModel):
     tags: list[str]
     fridge_days: int | None
     suggested_category: str | None
+    # Only set for recipes read back from a FoodFolio PDF.
+    total_time: str | None = None
+    source_url: str | None = None
 
 
 # --- Substitutions -----------------------------------------------------------
@@ -174,4 +186,3 @@ class Substitute(BaseModel):
     quantity: float
     unit: AppUnit
     note: str
-

@@ -2,7 +2,7 @@ import axios from "axios";
 import { API_URL } from "../constants/config";
 import { getInstallId } from "./database";
 
-// code: "network" | "not-configured" | "rate-limited" | "no-recipe" | "fetch-blocked" | "needs-caption" | "failed"
+// code: "network" | "not-configured" | "rate-limited" | "no-recipe" | "fetch-blocked" | "needs-caption" | "bad-file" | "too-large" | "failed"
 export class ApiError extends Error {
   constructor(code, message) {
     super(message);
@@ -24,6 +24,8 @@ export async function apiPost(path, body) {
     if (code === "not_a_recipe") throw new ApiError("no-recipe", code);
     if (code === "caption_needed") throw new ApiError("needs-caption", code);
     if (code === "fetch_failed") throw new ApiError("fetch-blocked", code);
+    if (code === "bad_request") throw new ApiError("bad-file", e.response?.data?.error?.message);
+    if (code === "too_large" || e.response?.status === 413) throw new ApiError("too-large", code);
     if (code === "rate_limited" || e.response?.status === 429) {
       throw new ApiError("rate-limited", code);
     }

@@ -50,6 +50,8 @@ const navigationRef = createNavigationContainerRef();
 // Expo Go has no native share module; only a development/production build does.
 const SHARE_INTENT_OPTIONS = { disabled: Constants.appOwnership === "expo" || Platform.OS === "web" };
 
+const fileUri = (path) => (/^[a-z]+:\/\//i.test(path) ? path : `file://${path}`);
+
 // Opens Add Recipe with whatever another app shared (a link, or text such as a caption).
 function ShareHandler({ ready }) {
   const { hasShareIntent, shareIntent, resetShareIntent } = useShareIntentContext();
@@ -57,8 +59,14 @@ function ShareHandler({ ready }) {
     if (!ready || !hasShareIntent) return;
     // Keep the text that came with a link: for Instagram and TikTok it is often
     // the caption, which is where the recipe is written.
+    // A PDF (FoodFolio's own recipe book, or any recipe PDF) is imported as a file.
+    const pdf = (shareIntent?.files || []).find(
+      (f) => f?.mimeType === "application/pdf" || /\.pdf$/i.test(f?.fileName || f?.path || "")
+    );
     const { url, text } = splitShared(shareIntent || {});
-    if (url || text) {
+    if (pdf) {
+      navigationRef.navigate("AddRecipe", { shared: { pdf: fileUri(pdf.path) }, at: Date.now() });
+    } else if (url || text) {
       navigationRef.navigate("AddRecipe", { shared: { url, text }, at: Date.now() });
     }
     resetShareIntent();

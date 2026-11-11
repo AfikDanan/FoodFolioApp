@@ -26,6 +26,8 @@ app ──POST /import──▶ HTTP API (throttled) ──▶ Lambda ──▶ 
 
 Instagram and TikTok links (`social.py`): the server has no login on those sites, so it never relies on the post page. It combines the caption the app shared along with the link, the post caption from TikTok's public oEmbed endpoint or Instagram's public embed page, and only when both are empty the page's preview tags. If nothing readable is found it answers `caption_needed` so the app can ask the person to paste the caption. Private accounts cannot be read.
 
+`POST /import-pdf` takes `{pdf: <base64, ≤ 4.4 MB>, categories[]}` and returns `{recipes: [...]}`. FoodFolio's own shared PDFs hold each recipe's data in a hidden `#FFREC1#<base64 JSON>#FFEND#` block (white text, see `util/recipeBook.js`), so they come back exactly as saved with no model call. Any other PDF's text goes to the model and yields one recipe. Scanned PDFs have no text layer; import a photo of them instead.
+
 `POST /substitute` takes `{ingredient, quantity, unit, recipe_title, other_ingredients[]}` and returns `{options: [{name, quantity, unit, note}]}` (at most 3, sized for the recipe amount).
 
 Errors are `{"error": {"code", "message"}}`: `bad_request` 400, `rate_limited` 429, `not_a_recipe` 422,
@@ -40,6 +42,7 @@ Errors are `{"error": {"code", "message"}}`: `bad_request` 400, `rate_limited` 4
 | `handler.py` | Lambda entry: routing, validation, error mapping, logging |
 | `service.py` | The use case, plus code-side clean-up of model output |
 | `fetch.py` | SSRF-safe page, JSON and short-link download |
+| `pdf.py` | Recipes from shared PDFs (`pypdf`) |
 | `social.py` | Instagram and TikTok captions from public preview endpoints |
 | `extract.py` | HTML → JSON-LD recipe, or preview tags plus visible text (no per-site scrapers) |
 | `llm.py`, `prompts.py` | The only code that knows about the model |

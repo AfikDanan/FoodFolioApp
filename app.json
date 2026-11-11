@@ -49,10 +49,12 @@
           "iosActivationRules": {
             "NSExtensionActivationSupportsWebURLWithMaxCount": 1,
             "NSExtensionActivationSupportsWebPageWithMaxCount": 1,
-            "NSExtensionActivationSupportsText": true
+            "NSExtensionActivationSupportsText": true,
+            "NSExtensionActivationSupportsFileWithMaxCount": 1
           },
           "androidIntentFilters": [
-            "text/*"
+            "text/*",
+            "application/pdf"
           ]
         }
       ]

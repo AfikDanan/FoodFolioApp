@@ -19,7 +19,13 @@ import {
   fetchAllCategories,
   insertRecipeWithCategories,
 } from "../util/database";
-import { importFromUrl, importFromImage, importFromText, toDraft } from "../util/importRecipe";
+import {
+  importFromUrl,
+  importFromImage,
+  importFromPdf,
+  importFromText,
+  toDraft,
+} from "../util/importRecipe";
 import { isSocialUrl } from "../util/share";
 import {
   displayUnit,
@@ -29,7 +35,14 @@ import {
   stepsToObject,
   tintFor,
 } from "../util/recipeUtils";
-import { RoundButton, Segmented, Chip, DepartmentIcon, useToast } from "../components/UI/kit";
+import {
+  RoundButton,
+  Segmented,
+  Chip,
+  Checkbox,
+  DepartmentIcon,
+  useToast,
+} from "../components/UI/kit";
 import { C, F, SCREEN_PAD } from "../constants/theme";
 
 const SOCIAL_ERRORS = ["needs-caption", "social-no-recipe"];
@@ -41,7 +54,13 @@ const STAGES = [
   "מכין את המתכון לבדיקה",
 ];
 
-const TITLES = { form: "מתכון חדש", importing: "רגע…", review: "בדיקה לפני שמירה", error: "לא זוהה מתכון" };
+const TITLES = {
+  form: "מתכון חדש",
+  importing: "רגע…",
+  review: "בדיקה לפני שמירה",
+  multi: "מתכונים מהקובץ",
+  error: "לא זוהה מתכון",
+};
 
 const ERRORS = {
   "no-recipe": { title: "לא זוהה מתכון", sub: "אפשר לנסות שוב, או להזין את המתכון ידנית." },
@@ -58,6 +77,14 @@ const ERRORS = {
     title: "לא מצאנו מתכון בטקסט של הפוסט",
     sub: "לפעמים המתכון נמצא בתגובות או בסרטון עצמו. אפשר להעתיק אותו ולהדביק כאן, או לצלם מסך ולייבא כתמונה.",
   },
+  "bad-file": {
+    title: "לא הצלחנו לקרוא את הקובץ",
+    sub: "אפשר לשתף לכאן קובץ PDF של מתכונים. אם זה PDF סרוק, צלמו אותו ויבאו כתמונה.",
+  },
+  "too-large": {
+    title: "הקובץ גדול מדי",
+    sub: "אפשר לשתף פחות מתכונים בכל פעם, או לייבא את המתכון כתמונה.",
+  },
   network: { title: "אין חיבור לשרת", sub: "בדקו את החיבור לאינטרנט ונסו שוב." },
   failed: { title: "הייבוא נכשל", sub: "משהו השתבש בצד שלנו. אפשר לנסות שוב, או להזין ידנית." },
 };
@@ -73,6 +100,9 @@ function AddRecipeScreen({ navigation, route }) {
   const [photo, setPhoto] = useState(null);
   const [manual, setManual] = useState({ title: "", ingredients: "", steps: "" });
   const [draft, setDraft] = useState(null);
+  // Several recipes from one PDF: the drafts and which of them to save.
+  const [drafts, setDrafts] = useState([]);
+  const [keep, setKeep] = useState(new Set());
   const [categories, setCategories] = useState([]);
   const [categoryId, setCategoryId] = useState(null);
   const [saving, setSaving] = useState(false);
@@ -97,7 +127,9 @@ function AddRecipeScreen({ navigation, route }) {
     if (!shared || !categoriesLoaded || handledShare.current === stamp) return;
     handledShare.current = stamp;
     const names = categories.map((c) => c.name);
-    if (shared.url) {
+    if (shared.pdf) {
+      runImport(() => importFromPdf(shared.pdf, names));
+    } else if (shared.url) {
       setTab("link");
       setUrl(shared.url);
       setPasted(shared.text || "");
@@ -124,10 +156,20 @@ function AddRecipeScreen({ navigation, route }) {
     // we wait, but never past the last "preparing" stage until the reply lands.
     stageTimer.current = setInterval(() => setStage((s) => Math.min(s + 1, STAGES.length - 2)), 1600);
     try {
-      const result = await work();
+      let result = await work();
       clearInterval(stageTimer.current);
       setStage(STAGES.length);
-      setDraft({ ...result, sourceUrl: fromUrl || null });
+      if (Array.isArray(result)) {
+        if (result.length === 0) throw Object.assign(new Error("empty"), { code: "no-recipe" });
+        if (result.length > 1) {
+          setDrafts(result);
+          setKeep(new Set(result.map((_, i) => i)));
+          setPhase("multi");
+          return;
+        }
+        result = result[0];
+      }
+      setDraft({ ...result, sourceUrl: fromUrl || result.sourceUrl || null });
       const suggested = categories.find((c) => c.name === result.suggestedCategory);
       setCategoryId(suggested ? suggested.id : null);
       setPhase("review");
@@ -187,6 +229,39 @@ function AddRecipeScreen({ navigation, route }) {
       ? await ExpoImagePicker.launchCameraAsync({ quality: 0.8 })
       : await ExpoImagePicker.launchImageLibraryAsync({ quality: 0.8 });
     if (!result.canceled) setPhoto(result.assets[0].uri);
+  };
+
+  const categoryIdFor = (d) => categories.find((c) => c.name === d.suggestedCategory)?.id;
+
+  const saveMany = async () => {
+    const chosen = drafts.filter((_, i) => keep.has(i));
+    if (!chosen.length || saving) return;
+    setSaving(true);
+    let saved = 0;
+    for (const d of chosen) {
+      try {
+        const id = categoryIdFor(d);
+        await insertRecipeWithCategories({
+          title: d.title.trim(),
+          ingredients: d.ingredients,
+          instructions: stepsToObject(d.steps),
+          totalTime: d.totalTime,
+          servings: d.servings,
+          tags: d.tags,
+          fridgeDays: d.fridgeDays,
+          estimatedIdx: d.estimatedIdx,
+          sourceUrl: d.sourceUrl || null,
+          categoryIds: id ? [id] : [],
+        });
+        saved += 1;
+      } catch (e) {
+        console.error("Error saving recipe from PDF:", e);
+      }
+    }
+    toast(
+      saved === chosen.length ? `${saved} מתכונים נשמרו` : `נשמרו ${saved} מתוך ${chosen.length} מתכונים`
+    );
+    navigation.reset({ index: 0, routes: [{ name: "Home", params: { screen: "All Recipes" } }] });
   };
 
   const save = async () => {
@@ -501,6 +576,61 @@ function AddRecipeScreen({ navigation, route }) {
           <Cta label="שמירה למתכונים" onPress={save} disabled={!draft.title.trim() || saving} bottom={insets.bottom} />
         </>
       )}
+
+      {phase === "multi" && (
+        <>
+          <ScrollView style={{ flex: 1 }} contentContainerStyle={styles.body}>
+            <View style={styles.labelRow}>
+              <Text style={styles.label}>נמצאו {drafts.length} מתכונים</Text>
+              <TouchableOpacity
+                onPress={() =>
+                  setKeep(keep.size === drafts.length ? new Set() : new Set(drafts.map((_, i) => i)))
+                }
+              >
+                <Text style={styles.pasteLink}>
+                  {keep.size === drafts.length ? "ניקוי" : "בחירת הכל"}
+                </Text>
+              </TouchableOpacity>
+            </View>
+            <Text style={styles.meta}>
+              כל מתכון יישמר בקטגוריה שלו אם יש לכם קטגוריה בשם הזה. אפשר לערוך כל מתכון אחרי השמירה.
+            </Text>
+            {drafts.map((d, i) => {
+              const toggle = () =>
+                setKeep((prev) => {
+                  const next = new Set(prev);
+                  if (next.has(i)) next.delete(i);
+                  else next.add(i);
+                  return next;
+                });
+              const cat = categories.find((c) => c.id === categoryIdFor(d));
+              return (
+                <TouchableOpacity key={i} activeOpacity={0.8} style={styles.multiRow} onPress={toggle}>
+                  <Checkbox checked={keep.has(i)} onPress={toggle} />
+                  <View style={{ flex: 1, gap: 2 }}>
+                    <Text style={styles.multiTitle}>{d.title}</Text>
+                    <Text style={styles.meta}>
+                      {[
+                        cat?.name,
+                        `${d.ingredients.length} מרכיבים`,
+                        `${d.steps.length} שלבים`,
+                      ]
+                        .filter(Boolean)
+                        .join(" · ")}
+                    </Text>
+                  </View>
+                </TouchableOpacity>
+              );
+            })}
+          </ScrollView>
+          <Cta
+            label={keep.size ? `שמירת ${keep.size} מתכונים` : "בחרו מתכון אחד לפחות"}
+            onPress={saveMany}
+            disabled={keep.size === 0 || saving}
+            bottom={insets.bottom}
+          />
+        </>
+      )}
     </View>
   );
 }
@@ -670,6 +800,17 @@ const styles = StyleSheet.create({
     paddingVertical: 4,
   },
   meta: { fontFamily: F.body, fontSize: 13, color: C.muted },
+  multiRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    backgroundColor: C.card,
+    borderWidth: 1,
+    borderColor: C.line,
+    borderRadius: 14,
+    padding: 14,
+  },
+  multiTitle: { fontFamily: F.semi, fontSize: 16, color: C.ink },
   wrap: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
   card: { backgroundColor: C.card, borderRadius: 16, borderWidth: 1, borderColor: C.line },
   ingRow: { flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 11, paddingHorizontal: 14 },

@@ -5,6 +5,8 @@ POST /import      {"type": "url", "url": "...", "text"?: "<shared caption>"}
                   | {"type": "image", "image": "<base64>"}
                   optional "categories": [str]  (the user's category names)
               ->  200 {"recipe": {...}}
+POST /import-pdf  {"pdf": "<base64>", "categories"?: [str]}
+              ->  200 {"recipes": [{...}, ...]}  (FoodFolio's own PDFs hold several)
 POST /substitute  {"ingredient", "quantity", "unit", "recipe_title", "other_ingredients"}
               ->  200 {"options": [{"name", "quantity", "unit", "note"}]}
 
@@ -22,8 +24,8 @@ from pydantic import TypeAdapter, ValidationError
 
 from .errors import ApiError, bad_request
 from .ratelimit import enforce_limits
-from .schemas import ImportRequest, SubstituteRequest
-from .service import import_recipe, source_host, substitute
+from .schemas import ImportRequest, PdfImport, SubstituteRequest
+from .service import import_pdf, import_recipe, source_host, substitute
 
 logging.getLogger().setLevel(logging.INFO)
 log = logging.getLogger(__name__)
@@ -43,6 +45,11 @@ ROUTES = {
         TypeAdapter(ImportRequest),
         lambda request: import_recipe(request),
         lambda recipe: {"recipe": recipe.model_dump()},
+    ),
+    "/import-pdf": Route(
+        TypeAdapter(PdfImport),
+        lambda request: import_pdf(request),
+        lambda recipes: {"recipes": [r.model_dump() for r in recipes]},
     ),
     "/substitute": Route(
         TypeAdapter(SubstituteRequest),

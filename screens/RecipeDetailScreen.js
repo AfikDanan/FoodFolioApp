@@ -7,14 +7,10 @@ import {
   TouchableOpacity,
   StyleSheet,
   Alert,
-  Share,
   Linking,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
-import * as Print from "expo-print";
-import * as Sharing from "expo-sharing";
-import * as FileSystem from "expo-file-system/legacy";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { fetchRecipeById, deleteRecipeById } from "../util/database";
 import {
@@ -26,11 +22,11 @@ import {
   useToast,
 } from "../components/UI/kit";
 import { fetchSubstitutes } from "../util/substitute";
+import { shareRecipes } from "../util/shareRecipes";
 import { addToShoppingList } from "../util/shopping";
 import {
   displayUnit,
   formatQty,
-  hasPhoto,
   parseIngredients,
   parseJsonList,
   parseQty,
@@ -176,80 +172,23 @@ function RecipeDetailScreen({ navigation, route }) {
     ]);
   };
 
+  // Share what is on screen: the current servings, quantities and substitutions.
   const generatePdf = async () => {
-    let imageTag = "";
-    if (hasPhoto(recipe.image)) {
-      try {
-        const b64 = await FileSystem.readAsStringAsync(recipe.image, { encoding: "base64" });
-        imageTag = `<img src="data:image/png;base64,${b64}" class="recipe-image" />`;
-      } catch (error) {
-        console.error("Failed to convert image to base64:", error);
-      }
-    }
-    const html = `
-      <html dir="rtl" lang="he">
-        <head>
-          <meta charset="utf-8">
-          <style>
-            body { font-family: Arial, sans-serif; direction: rtl; text-align: right; }
-            .container { padding: 20px 50px; }
-            .title { font-size: 24px; font-weight: bold; text-align: center; margin-bottom: 20px; }
-            .meta-info { text-align: center; margin-bottom: 20px; }
-            .heading { font-size: 20px; font-weight: bold; margin-bottom: 10px; }
-            .ingredient-item { margin-bottom: 5px; }
-            .recipe-image { width: 100%; height: auto; margin-bottom: 20px; }
-            ol { padding-right: 20px; }
-          </style>
-        </head>
-        <body>
-          <div class="container">
-            ${imageTag}
-            <div class="title">${recipe.title}</div>
-            <div class="meta-info">${recipe.category} &#8226; ${recipe.totalTime || "לא צוין"} &#8226; ${servings} מנות</div>
-            <div class="heading">מרכיבים</div>
-            ${ingredients
-              .map((i, idx) => {
-                const l = lineFor(i, idx);
-                return `<div class="ingredient-item">${l.qty} ${l.name}</div>`;
-              })
-              .join("")}
-            <div class="heading" style="margin-top:20px">הוראות הכנה</div>
-            <ol>${steps.map((s) => `<li>${s}</li>`).join("")}</ol>
-          </div>
-        </body>
-      </html>`;
     try {
-      const { uri } = await Print.printToFileAsync({ html });
-      // Share from our own cache folder: the print output location is not always readable by the share sheet.
-      const safeName = (recipe.title || "recipe").replace(/[\\/:*?"<>|]+/g, " ").trim().slice(0, 60) || "recipe";
-      const target = `${FileSystem.cacheDirectory}${safeName}.pdf`;
-      await FileSystem.deleteAsync(target, { idempotent: true });
-      await FileSystem.copyAsync({ from: uri, to: target });
-      await Sharing.shareAsync(target, {
-        mimeType: "application/pdf",
-        UTI: "com.adobe.pdf",
-        dialogTitle: recipe.title,
-      });
-    } catch (e) {
-      console.warn("Share recipe as PDF failed", e);
-      // Fall back to plain text, which every share target accepts.
-      const text = [
-        recipe.title,
-        "",
-        "מרכיבים",
-        ...ingredients.map((i, idx) => {
-          const l = lineFor(i, idx);
-          return `• ${l.qty} ${l.name}`.replace(/\s+/g, " ");
-        }),
-        "",
-        "הוראות הכנה",
-        ...steps.map((s, n) => `${n + 1}. ${s}`),
-      ].join("\n");
-      try {
-        await Share.share({ message: text });
-      } catch (err) {
-        Alert.alert("השיתוף נכשל", String(err?.message || e?.message || err));
-      }
+      await shareRecipes([
+        {
+          ...recipe,
+          servings,
+          ingredients: ingredients.map((ing, i) => ({
+            ...ing,
+            name: nameOf(i),
+            quantity: qtyOf(i),
+            unit: unitOf(i) || "יחידה",
+          })),
+        },
+      ]);
+    } catch (err) {
+      Alert.alert("השיתוף נכשל", String(err?.message || err));
     }
   };
 

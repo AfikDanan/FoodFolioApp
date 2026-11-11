@@ -5,7 +5,7 @@ import binascii
 import re
 from urllib.parse import urlsplit
 
-from . import llm
+from . import llm, pdf
 from .config import get_settings
 from .errors import ApiError, bad_request, caption_needed, not_a_recipe
 from .extract import meta_text, page_to_model_input
@@ -16,6 +16,7 @@ from .schemas import (
     ImageImport,
     ImportRequest,
     ModelRecipe,
+    PdfImport,
     Recipe,
     Substitute,
     SubstituteRequest,
@@ -89,6 +90,21 @@ def _link_text(request: UrlImport | HtmlImport, limit: int) -> str:
     if len(parts) == 1 and parts[0][0] == "Page":
         return parts[0][1][:limit]
     return "\n\n".join(f"{label}:\n{value}" for label, value in parts)[:limit]
+
+
+def import_pdf(request: PdfImport) -> list[Recipe]:
+    """Recipes from a PDF: FoodFolio's own data blocks if present, else one via the model."""
+    text = pdf.pdf_text(pdf.decode_pdf(request.pdf))
+    embedded = pdf.embedded_recipes(text, request.categories)
+    if embedded:
+        return [Recipe(**recipe) for recipe in embedded]
+    text = pdf.strip_blocks(text).strip()
+    if len(text) < 20:
+        raise not_a_recipe()  # a scanned PDF has no text layer; a photo import reads it
+    raw = llm.extract_recipe(
+        text=text[: get_settings().max_page_chars], image_b64=None, categories=request.categories
+    )
+    return [clean_recipe(raw, request.categories)]
 
 
 def _checked_image(request: ImageImport) -> str:
