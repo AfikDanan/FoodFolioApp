@@ -8,6 +8,7 @@ import {
   StyleSheet,
   Alert,
   Share,
+  Linking,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
@@ -36,6 +37,7 @@ import {
   parseSteps,
   quantityStep,
   recipeTimeLabel,
+  sourceInfo,
   stepQuantity,
 } from "../util/recipeUtils";
 import { C, F, SCREEN_PAD } from "../constants/theme";
@@ -252,6 +254,7 @@ function RecipeDetailScreen({ navigation, route }) {
   };
 
   const time = recipeTimeLabel(recipe) || recipe.totalTime || "לא צוין";
+  const source = sourceInfo(recipe.source_url);
 
   return (
     <View style={styles.root}>
@@ -301,6 +304,22 @@ function RecipeDetailScreen({ navigation, route }) {
               </View>
             </View>
           </View>
+
+          {!!source && (
+            <TouchableOpacity
+              activeOpacity={0.8}
+              style={styles.sourceRow}
+              onPress={() =>
+                Linking.openURL(source.url).catch(() => toast("לא הצלחנו לפתוח את הקישור"))
+              }
+            >
+              <Ionicons name={source.icon} size={18} color={C.ink} />
+              <Text style={styles.sourceText} numberOfLines={1}>
+                למתכון המקורי ב{source.label}
+              </Text>
+              <Ionicons name="open-outline" size={16} color={C.muted} />
+            </TouchableOpacity>
+          )}
 
           {servings !== base && (
             <View style={styles.scaleNote}>
@@ -549,6 +568,18 @@ const styles = StyleSheet.create({
   category: { fontFamily: F.medium, fontSize: 13, color: C.accent },
   title: { fontFamily: F.display900, fontSize: 30, lineHeight: 34, color: C.ink },
   statRow: { flexDirection: "row", gap: 10 },
+  sourceRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    backgroundColor: C.card,
+    borderWidth: 1,
+    borderColor: C.line,
+    borderRadius: 14,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+  },
+  sourceText: { flex: 1, fontFamily: F.medium, fontSize: 15, color: C.ink },
   stat: {
     backgroundColor: C.card,
     borderWidth: 1,

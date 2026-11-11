@@ -127,7 +127,7 @@ function AddRecipeScreen({ navigation, route }) {
       const result = await work();
       clearInterval(stageTimer.current);
       setStage(STAGES.length);
-      setDraft(result);
+      setDraft({ ...result, sourceUrl: fromUrl || null });
       const suggested = categories.find((c) => c.name === result.suggestedCategory);
       setCategoryId(suggested ? suggested.id : null);
       setPhase("review");
@@ -202,6 +202,7 @@ function AddRecipeScreen({ navigation, route }) {
         tags: draft.tags,
         fridgeDays: draft.fridgeDays,
         estimatedIdx: draft.estimatedIdx,
+        sourceUrl: draft.sourceUrl || null,
         categoryIds: categoryId ? [categoryId] : [],
       });
       const cat = categories.find((c) => c.id === categoryId);

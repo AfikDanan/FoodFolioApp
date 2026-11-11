@@ -201,3 +201,22 @@ describe("normalizeMeals", () => {
     expect(MEAL_PRESETS.map((p) => p.meals.length)).toEqual([2, 3, 5]);
   });
 });
+
+describe("sourceInfo", () => {
+  const { sourceInfo } = require("../recipeUtils");
+  it.each([
+    ["https://www.instagram.com/reel/C1abc/", "אינסטגרם", "logo-instagram"],
+    ["https://vm.tiktok.com/ZMabc/", "טיקטוק", "logo-tiktok"],
+    ["https://youtu.be/abc", "יוטיוב", "logo-youtube"],
+    ["https://www.10dakot.co.il/recipe/x", "10dakot.co.il", "link-outline"],
+  ])("%s", (url, label, icon) => {
+    expect(sourceInfo(url)).toEqual({ url, label, icon });
+  });
+
+  it.each([null, "", "not a link", "javascript:alert(1)", "file:///etc/passwd"])(
+    "ignores %s",
+    (url) => {
+      expect(sourceInfo(url)).toBeNull();
+    }
+  );
+});

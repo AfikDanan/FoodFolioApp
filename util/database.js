@@ -139,6 +139,7 @@ async function migrateSchema() {
     await addColumnIfMissing("recipes", "tags", "TEXT");
     await addColumnIfMissing("recipes", "fridge_days", "INTEGER");
     await addColumnIfMissing("recipes", "est_idx", "TEXT");
+    await addColumnIfMissing("recipes", "source_url", "TEXT");
     await db.runAsync(
       "CREATE TABLE IF NOT EXISTS app_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);"
     );
@@ -293,7 +294,7 @@ const insertRecipeWithCategories = async (recipe) => {
 
     // Insert recipe into recipes table
     const result = await db.runAsync(
-      "INSERT INTO recipes (title, ingredients, instructions, image, totalTime, servings, tags, fridge_days, est_idx) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);",
+      "INSERT INTO recipes (title, ingredients, instructions, image, totalTime, servings, tags, fridge_days, est_idx, source_url) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);",
       [
         recipe.title,
         JSON.stringify(recipe.ingredients),
@@ -304,6 +305,7 @@ const insertRecipeWithCategories = async (recipe) => {
         JSON.stringify(recipe.tags || []),
         recipe.fridgeDays ?? null,
         JSON.stringify(recipe.estimatedIdx || []),
+        recipe.sourceUrl || null,
       ]
     );
 
@@ -335,7 +337,7 @@ async function fetchAllRecipesWithCategories() {
   try {
     db = await getDb();
     const rows = await db.getAllAsync(`
-      SELECT r.id, r.title, r.ingredients, r.instructions, r.image, r.totalTime, r.servings, r.tags, r.fridge_days, r.est_idx, GROUP_CONCAT(c.name) AS categoryNames
+      SELECT r.id, r.title, r.ingredients, r.instructions, r.image, r.totalTime, r.servings, r.tags, r.fridge_days, r.est_idx, r.source_url, GROUP_CONCAT(c.name) AS categoryNames
       FROM recipes r
       LEFT JOIN recipe_categories rc ON r.id = rc.recipeId
       LEFT JOIN categories c ON rc.categoryId = c.id
@@ -353,7 +355,7 @@ async function updateRecipeWithCategories(id, recipe, categoryIds) {
     db = await getDb();
     await db.runAsync(
       `
-      UPDATE recipes SET title = ?, ingredients = ?, instructions = ?, image = ?, totalTime = ?, servings = ? WHERE id = ?;`,
+      UPDATE recipes SET title = ?, ingredients = ?, instructions = ?, image = ?, totalTime = ?, servings = ?, source_url = ? WHERE id = ?;`,
       [
         recipe.title,
         recipe.ingredients,
@@ -361,6 +363,7 @@ async function updateRecipeWithCategories(id, recipe, categoryIds) {
         recipe.image,
         recipe.totalTime,
         recipe.servings || 4,
+        recipe.sourceUrl || null,
         id,
       ]
     );
