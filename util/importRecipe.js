@@ -92,6 +92,26 @@ export async function importFromImage(uri, categories = []) {
   return postImport({ type: "image", image: base64, categories });
 }
 
+export const MAX_SCREENSHOTS = 4;
+
+// Several screenshots of one post (the caption, the rest of it, a comment with
+// the recipe). Phone screenshots are already about 1080 px wide, so they are
+// only recompressed, at that width, to keep the upload small.
+export async function importFromImages(uris, categories = []) {
+  const list = uris.slice(0, MAX_SCREENSHOTS);
+  if (list.length === 1) return importFromImage(list[0], categories);
+  const images = [];
+  for (const uri of list) {
+    const { base64 } = await manipulateAsync(uri, [{ resize: { width: 1080 } }], {
+      compress: 0.6,
+      format: SaveFormat.JPEG,
+      base64: true,
+    });
+    images.push(base64);
+  }
+  return postImport({ type: "image", images, categories });
+}
+
 // The API takes a 6 MB body; base64 makes a file a third larger.
 const MAX_PDF_BASE64 = 5_900_000;
 

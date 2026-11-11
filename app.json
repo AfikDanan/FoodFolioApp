@@ -50,11 +50,16 @@
             "NSExtensionActivationSupportsWebURLWithMaxCount": 1,
             "NSExtensionActivationSupportsWebPageWithMaxCount": 1,
             "NSExtensionActivationSupportsText": true,
-            "NSExtensionActivationSupportsFileWithMaxCount": 1
+            "NSExtensionActivationSupportsFileWithMaxCount": 1,
+            "NSExtensionActivationSupportsImageWithMaxCount": 4
           },
           "androidIntentFilters": [
             "text/*",
+            "image/*",
             "application/pdf"
+          ],
+          "androidMultiIntentFilters": [
+            "image/*"
           ]
         }
       ]

@@ -6,7 +6,7 @@ two in sync: the app shows exactly the strings returned here.
 
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 UNITS = (
     "מיליליטר",
@@ -89,12 +89,28 @@ class UrlImport(BaseModel):
     )
 
 
+Base64Image = Annotated[str, Field(min_length=100)]  # base64 JPEG/PNG
+
+
 class ImageImport(BaseModel):
+    """A photo of a recipe, or up to 4 screenshots of one post (caption, comments...)."""
+
     type: Literal["image"]
-    image: Annotated[str, Field(min_length=100)]  # base64 JPEG/PNG
+    image: Base64Image | None = None
+    images: list[Base64Image] = Field(default_factory=list, max_length=4)
     categories: list[Annotated[str, Field(max_length=40)]] = Field(
         default_factory=list, max_length=30
     )
+
+    @model_validator(mode="after")
+    def _has_an_image(self):
+        if not self.image and not self.images:
+            raise ValueError("image or images is required")
+        return self
+
+    @property
+    def all_images(self) -> list[str]:
+        return ([self.image] if self.image else []) + self.images
 
 
 class HtmlImport(BaseModel):

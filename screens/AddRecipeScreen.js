@@ -21,8 +21,9 @@ import {
 } from "../util/database";
 import {
   importFromUrl,
-  importFromImage,
+  importFromImages,
   importFromPdf,
+  MAX_SCREENSHOTS,
   importFromText,
   toDraft,
 } from "../util/importRecipe";
@@ -71,11 +72,11 @@ const ERRORS = {
   },
   "needs-caption": {
     title: "לא הצלחנו לקרוא את הפוסט",
-    sub: "כנראה שזה פוסט מחשבון פרטי: גם אם אתם עוקבים אחריו, FoodFolio לא רואה אותו. העתיקו את הכיתוב באינסטגרם או בטיקטוק וחזרו לכאן, או צלמו מסך של המתכון.",
+    sub: "כנראה שזה פוסט מחשבון פרטי: גם אם אתם עוקבים אחריו, FoodFolio לא רואה אותו. צלמו מסך של הפוסט אחרי שפתחתם את הכיתוב המלא (״עוד״), ובחרו כאן את צילומי המסך, עד " + MAX_SCREENSHOTS + ".",
   },
   "social-no-recipe": {
     title: "לא מצאנו מתכון בטקסט של הפוסט",
-    sub: "לפעמים המתכון נמצא בתגובות או בסרטון עצמו. אפשר להעתיק אותו ולהדביק כאן, או לצלם מסך ולייבא כתמונה.",
+    sub: "לפעמים המתכון נמצא בתגובות או בסרטון עצמו. צלמו מסך של המקום שבו הוא כתוב ובחרו כאן את צילומי המסך.",
   },
   "bad-file": {
     title: "לא הצלחנו לקרוא את הקובץ",
@@ -97,7 +98,7 @@ function AddRecipeScreen({ navigation, route }) {
   const [stage, setStage] = useState(0);
   const [url, setUrl] = useState("");
   const [pasted, setPasted] = useState("");
-  const [photo, setPhoto] = useState(null);
+  const [photos, setPhotos] = useState([]);
   const [manual, setManual] = useState({ title: "", ingredients: "", steps: "" });
   const [draft, setDraft] = useState(null);
   // Several recipes from one PDF: the drafts and which of them to save.
@@ -129,6 +130,10 @@ function AddRecipeScreen({ navigation, route }) {
     const names = categories.map((c) => c.name);
     if (shared.pdf) {
       runImport(() => importFromPdf(shared.pdf, names));
+    } else if (shared.images?.length) {
+      setTab("photo");
+      setPhotos(shared.images);
+      runImport(() => importFromImages(shared.images, names));
     } else if (shared.url) {
       setTab("link");
       setUrl(shared.url);
@@ -144,11 +149,12 @@ function AddRecipeScreen({ navigation, route }) {
 
   const canSubmit =
     (tab === "link" && (url.trim().length > 0 || pasted.trim().length >= 20)) ||
-    (tab === "photo" && !!photo) ||
+    (tab === "photo" && photos.length > 0) ||
     (tab === "manual" && manual.title.trim().length > 0);
 
   // `fromUrl` is the link being imported, used to word errors for Instagram and TikTok.
-  const runImport = async (work, fromUrl = null) => {
+  // `fromImages`: the link is only the source of screenshots, not what was read.
+  const runImport = async (work, fromUrl = null, { fromImages = false } = {}) => {
     setPhase("importing");
     setStage(0);
     clearInterval(stageTimer.current);
@@ -178,7 +184,9 @@ function AddRecipeScreen({ navigation, route }) {
       const code = e.code || "failed";
       // A social post we could read but that holds no recipe usually has it in the
       // video or the comments: the fix is the same as for an unreadable post.
-      setErrorCode(isSocialUrl(fromUrl) && code === "no-recipe" ? "social-no-recipe" : code);
+      setErrorCode(
+        !fromImages && isSocialUrl(fromUrl) && code === "no-recipe" ? "social-no-recipe" : code
+      );
       setPhase("error");
     }
   };
@@ -194,7 +202,9 @@ function AddRecipeScreen({ navigation, route }) {
         url.trim() || null
       );
     } else if (tab === "photo") {
-      runImport(() => importFromImage(photo, categories.map((c) => c.name)));
+      runImport(() => importFromImages(photos, categories.map((c) => c.name)), url.trim() || null, {
+        fromImages: true,
+      });
     } else {
       const ingredients = manual.ingredients
         .split("\n")
@@ -224,11 +234,22 @@ function AddRecipeScreen({ navigation, route }) {
     const perm = fromCamera
       ? await ExpoImagePicker.requestCameraPermissionsAsync()
       : await ExpoImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!perm.granted) return;
+    if (!perm.granted) return [];
+    const room = MAX_SCREENSHOTS - (fromCamera ? photos.length : 0);
     const result = fromCamera
       ? await ExpoImagePicker.launchCameraAsync({ quality: 0.8 })
-      : await ExpoImagePicker.launchImageLibraryAsync({ quality: 0.8 });
-    if (!result.canceled) setPhoto(result.assets[0].uri);
+      : await ExpoImagePicker.launchImageLibraryAsync({
+          quality: 0.8,
+          allowsMultipleSelection: true,
+          selectionLimit: MAX_SCREENSHOTS,
+          orderedSelection: true,
+        });
+    if (result.canceled) return [];
+    const uris = result.assets.map((a) => a.uri);
+    // The camera adds a page; the gallery picks the whole set again.
+    const next = fromCamera ? [...photos, ...uris].slice(0, MAX_SCREENSHOTS) : uris.slice(0, room);
+    setPhotos(next);
+    return next;
   };
 
   const categoryIdFor = (d) => categories.find((c) => c.name === d.suggestedCategory)?.id;
@@ -293,21 +314,17 @@ function AddRecipeScreen({ navigation, route }) {
     }
   };
 
-  // Private or unreadable post: the person copies the caption in Instagram or
-  // TikTok, comes back and imports it with one tap (the link is kept as context).
-  const pasteCaptionAndRetry = async () => {
-    const clip = ((await Clipboard.getStringAsync()) || "").trim();
-    if (clip.length < 20 || /^https?:\/\/\S+$/.test(clip)) {
-      toast("קודם מעתיקים את הכיתוב של הפוסט, ואז חוזרים לכאן");
-      return;
-    }
-    setPasted(clip);
-    const names = categories.map((c) => c.name);
-    const link = url.trim();
-    runImport(
-      () => (link ? importFromUrl(link, names, clip) : importFromText(clip, names)),
-      link || null
-    );
+  // Private or unreadable post: neither app lets you copy a caption, so the
+  // person screenshots the post and picks the screenshots here. The link is
+  // kept as the recipe's source.
+  const importScreenshots = async () => {
+    setTab("photo");
+    const picked = await pickPhoto(false);
+    if (!picked?.length) return; // cancelled: stay on this screen
+    const link = url.trim() || null;
+    runImport(() => importFromImages(picked, categories.map((c) => c.name)), link, {
+      fromImages: true,
+    });
   };
 
   const resetToForm = (nextTab) => {
@@ -380,7 +397,8 @@ function AddRecipeScreen({ navigation, route }) {
                   </View>
                   <Text style={styles.videoText}>
                     הכי פשוט: לשתף את הסרטון מאינסטגרם או מטיקטוק ישירות ל-FoodFolio. אם הייבוא לא
-                    מצליח, מעתיקים את הכיתוב של הסרטון ומדביקים אותו בשדה שלמעלה, ליד הקישור.
+                    מצליח (למשל בחשבון פרטי), פותחים את הכיתוב המלא, מצלמים מסך ומשתפים את צילומי
+                    המסך ל-FoodFolio, עד {MAX_SCREENSHOTS}.
                   </Text>
                 </View>
               </>
@@ -393,22 +411,36 @@ function AddRecipeScreen({ navigation, route }) {
                   style={styles.dropzone}
                   onPress={() => pickPhoto(true)}
                 >
-                  {photo ? (
-                    <Image source={{ uri: photo }} style={styles.preview} resizeMode="cover" />
+                  {photos.length > 0 ? (
+                    <>
+                      <Image source={{ uri: photos[0] }} style={styles.preview} resizeMode="cover" />
+                      {photos.length > 1 && (
+                        <View style={styles.photoCount}>
+                          <Text style={styles.photoCountText}>{photos.length} תמונות</Text>
+                        </View>
+                      )}
+                    </>
                   ) : (
                     <>
                       <Ionicons name="camera-outline" size={34} color={C.muted} />
                       <Text style={styles.dropTitle}>צילום דף מתכון</Text>
                       <Text style={styles.dropSub}>
-                        ספר בישול, מחברת בכתב יד או צילום מסך.
+                        ספר בישול, מחברת בכתב יד או צילומי מסך (עד {MAX_SCREENSHOTS}).
                       </Text>
                     </>
                   )}
                 </TouchableOpacity>
                 <TouchableOpacity style={styles.secondary} onPress={() => pickPhoto(false)}>
                   <Ionicons name="images-outline" size={18} color={C.ink} />
-                  <Text style={styles.secondaryText}>בחירה מהגלריה</Text>
+                  <Text style={styles.secondaryText}>
+                    בחירה מהגלריה (אפשר כמה צילומי מסך)
+                  </Text>
                 </TouchableOpacity>
+                {photos.length > 0 && (
+                  <TouchableOpacity style={{ alignSelf: "center" }} onPress={() => setPhotos([])}>
+                    <Text style={styles.pasteLink}>ניקוי התמונות</Text>
+                  </TouchableOpacity>
+                )}
               </>
             )}
 
@@ -482,11 +514,11 @@ function AddRecipeScreen({ navigation, route }) {
           <Text style={styles.errorSub}>{ERRORS[errorCode]?.sub || ERRORS.failed.sub}</Text>
           {SOCIAL_ERRORS.includes(errorCode) ? (
             <>
-              <TouchableOpacity style={styles.primarySmall} onPress={pasteCaptionAndRetry}>
-                <Text style={styles.primarySmallText}>הדבקת הכיתוב שהעתקתי</Text>
+              <TouchableOpacity style={styles.primarySmall} onPress={importScreenshots}>
+                <Text style={styles.primarySmallText}>בחירת צילומי מסך</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={styles.secondary} onPress={() => resetToForm("photo")}>
-                <Text style={styles.secondaryText}>ייבוא מצילום מסך</Text>
+              <TouchableOpacity style={styles.secondary} onPress={() => resetToForm()}>
+                <Text style={styles.secondaryText}>נסו שוב</Text>
               </TouchableOpacity>
             </>
           ) : (
@@ -800,6 +832,16 @@ const styles = StyleSheet.create({
     paddingVertical: 4,
   },
   meta: { fontFamily: F.body, fontSize: 13, color: C.muted },
+  photoCount: {
+    position: "absolute",
+    bottom: 10,
+    right: 10,
+    backgroundColor: "rgba(29,29,27,0.75)",
+    borderRadius: 999,
+    paddingVertical: 4,
+    paddingHorizontal: 10,
+  },
+  photoCountText: { fontFamily: F.semi, fontSize: 13, color: C.white },
   multiRow: {
     flexDirection: "row",
     alignItems: "center",

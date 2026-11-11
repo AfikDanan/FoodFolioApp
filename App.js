@@ -63,9 +63,16 @@ function ShareHandler({ ready }) {
     const pdf = (shareIntent?.files || []).find(
       (f) => f?.mimeType === "application/pdf" || /\.pdf$/i.test(f?.fileName || f?.path || "")
     );
+    // Screenshots of a post (or a photo of a recipe page), up to 4.
+    const images = (shareIntent?.files || [])
+      .filter((f) => /^image\//i.test(f?.mimeType || ""))
+      .map((f) => fileUri(f.path))
+      .slice(0, 4);
     const { url, text } = splitShared(shareIntent || {});
     if (pdf) {
       navigationRef.navigate("AddRecipe", { shared: { pdf: fileUri(pdf.path) }, at: Date.now() });
+    } else if (images.length) {
+      navigationRef.navigate("AddRecipe", { shared: { images }, at: Date.now() });
     } else if (url || text) {
       navigationRef.navigate("AddRecipe", { shared: { url, text }, at: Date.now() });
     }

@@ -12,6 +12,7 @@ General
 - If it holds several recipes, extract the most prominent one only.
 - Output is Hebrew. If the source is in another language, translate it naturally. Keep the cook's original wording when it is already Hebrew, but drop ads, comments, life stories, ratings and calls to action.
 - Israeli kitchen: convert ounces and pounds to grams or kilograms, cups and spoons stay as they are, and convert Fahrenheit to Celsius in steps (350°F -> 180 מעלות). Use decimals for fractions (1/2 -> 0.5). Expand abbreviations (תפוא -> תפוח אדמה).
+- Screenshots of an Instagram or TikTok post: read the caption, and comments only when they hold the recipe. Ignore the app's interface (usernames, likes, buttons, "more", timestamps, music). Several screenshots may overlap: list each ingredient and step once.
 - For photos: read all visible pages, handle handwriting as best you can, and skip margin notes that are not part of the recipe. If part is unreadable, extract what you can read. Never invent steps or amounts that are not there, except where a field below tells you to estimate.
 - Social posts: the source may be an Instagram or TikTok caption, labelled "Shared text" or "Post caption", sometimes with the page's preview text. Ignore hashtags, emojis used as bullets, mentions, "follow for more" and engagement counts. Captions often list ingredients without amounts: give sensible amounts and mark them estimated. If the caption only points elsewhere ("the recipe is in the comments", "link in bio", "full recipe on the blog") and holds no ingredients, set is_recipe=false.
 - Structured data may arrive as JSON (schema.org). Durations there are ISO 8601 (PT1H30M = 90 minutes).
@@ -33,7 +34,7 @@ Fields
 """
 
 
-def build_user_text(*, content: str | None, categories: list[str]) -> str:
+def build_user_text(*, content: str | None, categories: list[str], photos: int = 1) -> str:
     """The user turn. For photos `content` is None and the image carries the text."""
     parts = []
     if content is not None:
@@ -44,7 +45,11 @@ def build_user_text(*, content: str | None, categories: list[str]) -> str:
     if content is not None:
         parts.append(f"<source>\n{content}\n</source>")
     else:
-        parts.append("The recipe is in the attached photo.")
+        parts.append(
+            "The recipe is in the attached photo."
+            if photos <= 1
+            else f"The recipe is spread over the {photos} attached photos, in order; combine them."
+        )
     return "\n\n".join(parts)
 
 

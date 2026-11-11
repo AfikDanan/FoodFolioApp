@@ -46,7 +46,7 @@ def import_recipe(request: ImportRequest) -> Recipe:
         )
     else:
         raw = llm.extract_recipe(
-            text=None, image_b64=_checked_image(request), categories=request.categories
+            text=None, image_b64=_checked_images(request), categories=request.categories
         )
     return clean_recipe(raw, request.categories)
 
@@ -107,14 +107,17 @@ def import_pdf(request: PdfImport) -> list[Recipe]:
     return [clean_recipe(raw, request.categories)]
 
 
-def _checked_image(request: ImageImport) -> str:
-    try:
-        size = len(base64.b64decode(request.image, validate=True))
-    except (binascii.Error, ValueError) as exc:
-        raise bad_request("The image is not valid base64.") from exc
-    if size > get_settings().max_image_bytes:
+def _checked_images(request: ImageImport) -> list[str]:
+    """Every image must be valid base64, and together they share one size budget."""
+    total = 0
+    for image in request.all_images:
+        try:
+            total += len(base64.b64decode(image, validate=True))
+        except (binascii.Error, ValueError) as exc:
+            raise bad_request("The image is not valid base64.") from exc
+    if total > get_settings().max_image_bytes:
         raise bad_request("The image is too large.")
-    return request.image
+    return request.all_images
 
 
 def _merge_duplicates(items) -> list[dict]:
