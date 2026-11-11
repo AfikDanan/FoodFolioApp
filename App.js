@@ -69,11 +69,15 @@ function ShareHandler({ ready }) {
       .map((f) => fileUri(f.path))
       .slice(0, 4);
     const { url, text } = splitShared(shareIntent || {});
-    if (pdf) {
+    // A link wins over images: some apps attach a preview picture to a shared
+    // post, and the post (with its caption) is what the person meant to share.
+    if (url) {
+      navigationRef.navigate("AddRecipe", { shared: { url, text }, at: Date.now() });
+    } else if (pdf) {
       navigationRef.navigate("AddRecipe", { shared: { pdf: fileUri(pdf.path) }, at: Date.now() });
     } else if (images.length) {
       navigationRef.navigate("AddRecipe", { shared: { images }, at: Date.now() });
-    } else if (url || text) {
+    } else if (text) {
       navigationRef.navigate("AddRecipe", { shared: { url, text }, at: Date.now() });
     }
     resetShareIntent();

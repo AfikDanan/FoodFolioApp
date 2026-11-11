@@ -3,12 +3,13 @@
 import base64
 import binascii
 import re
+from concurrent.futures import ThreadPoolExecutor
 from urllib.parse import urlsplit
 
 from . import llm, pdf
 from .config import get_settings
 from .errors import ApiError, bad_request, caption_needed, not_a_recipe
-from .extract import meta_text, page_to_model_input
+from .extract import page_to_model_input
 from .fetch import fetch_html
 from .schemas import (
     APP_UNIT,
@@ -23,7 +24,7 @@ from .schemas import (
     TextImport,
     UrlImport,
 )
-from .social import fetch_caption
+from .social import caption_from_page, fetch_caption
 from .social import platform as social_platform
 
 MAX_INGREDIENTS = 80
@@ -54,32 +55,40 @@ def import_recipe(request: ImportRequest) -> Recipe:
 def _link_text(request: UrlImport | HtmlImport, limit: int) -> str:
     """Everything we can learn about a link, as one text for the model.
 
-    Sources, in order: the caption the other app shared with the link, the post
-    caption read from Instagram or TikTok, and the page itself. A social post page
-    is a login wall for a server, so it is only read when nothing else worked.
+    Sources: the text the other app shared with the link, the post caption from
+    Instagram's or TikTok's public preview endpoints, and the page itself. The
+    page is always read too (as before captions were looked up), because a
+    lookup can come back empty or partial; the model gets all of it.
     """
-    settings = get_settings()
     shared = (request.text or "").replace(request.url, "").strip()
     social = social_platform(request.url)
-    caption = fetch_caption(request.url) if social and isinstance(request, UrlImport) else ""
-
-    page = ""
+    caption = ""
+    html = ""
     if isinstance(request, HtmlImport):
-        page = page_to_model_input(request.html, limit)
-    elif not social or not (shared or caption):
-        try:
-            html = fetch_html(
-                request.url, timeout=settings.fetch_timeout_s, max_bytes=settings.fetch_max_bytes
-            )
-            page = meta_text(html) if social else page_to_model_input(html, limit)
-        except ApiError:
-            # With shared text in hand we can still try; otherwise let the app
-            # fall back to fetching the page on the phone.
-            if not shared:
-                raise
+        html = request.html
+    else:
+        # In parallel: both are network calls and the API has 30 s in total.
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            lookup = pool.submit(fetch_caption, request.url) if social else None
+            page = pool.submit(_fetch_page, request.url)
+            caption = lookup.result() if lookup else ""
+            try:
+                html = page.result()
+            except ApiError:
+                # With text in hand we can still try; otherwise let the app
+                # fall back to fetching the page on the phone.
+                if not (shared or caption):
+                    raise
+
+    page_text = page_to_model_input(html, limit) if html else ""
+    page_caption = caption_from_page(html, social) if html and social else ""
 
     parts = []
-    for label, value in (("Shared text", shared), ("Post caption", caption), ("Page", page)):
+    for label, value in (
+        ("Shared text", shared),
+        ("Post caption", caption or page_caption),
+        ("Page", page_text),
+    ):
         value = value.strip()
         if value and not any(value in seen for _, seen in parts):
             parts.append((label, value))
@@ -90,6 +99,11 @@ def _link_text(request: UrlImport | HtmlImport, limit: int) -> str:
     if len(parts) == 1 and parts[0][0] == "Page":
         return parts[0][1][:limit]
     return "\n\n".join(f"{label}:\n{value}" for label, value in parts)[:limit]
+
+
+def _fetch_page(url: str) -> str:
+    settings = get_settings()
+    return fetch_html(url, timeout=settings.fetch_timeout_s, max_bytes=settings.fetch_max_bytes)
 
 
 def import_pdf(request: PdfImport) -> list[Recipe]:

@@ -120,12 +120,53 @@ def never(*a, **kw):
     raise AssertionError("must not be called")
 
 
-def test_social_link_uses_shared_text_and_caption_without_fetching_the_page(monkeypatch, model):
+def test_social_link_combines_shared_text_caption_and_page(monkeypatch, model):
     monkeypatch.setattr(service, "fetch_caption", lambda url: "קפטן: 2 כוסות קמח")
-    monkeypatch.setattr(service, "fetch_html", never)
+    monkeypatch.setattr(service, "fetch_html", lambda url, **kw: "<p>גוף הדף</p>")
     url = "https://www.instagram.com/reel/C1abc/"
     service.import_recipe(UrlImport(type="url", url=url, text=f"עוגה טעימה {url}"))
-    assert model["text"] == "Shared text:\nעוגה טעימה\n\nPost caption:\nקפטן: 2 כוסות קמח"
+    assert model["text"] == (
+        "Shared text:\nעוגה טעימה\n\nPost caption:\nקפטן: 2 כוסות קמח\n\nPage:\nגוף הדף"
+    )
+
+
+def test_empty_caption_lookup_still_reads_the_page_like_before(monkeypatch, model):
+    # Regression: the page used to be skipped or cut to its preview tags, which
+    # broke Instagram posts whose page text held the recipe.
+    monkeypatch.setattr(service, "fetch_caption", lambda url: "")
+    page = "<html><body><h1>עוגת שוקולד</h1><p>2 כוסות קמח, מערבבים ואופים</p></body></html>"
+    monkeypatch.setattr(service, "fetch_html", lambda url, **kw: page)
+    service.import_recipe(UrlImport(type="url", url="https://www.instagram.com/p/C1abc/"))
+    assert "2 כוסות קמח" in model["text"]
+
+
+def test_blocked_social_page_still_uses_the_caption(monkeypatch, model):
+    def blocked(url, **kw):
+        raise fetch_failed("429")
+
+    monkeypatch.setattr(service, "fetch_caption", lambda url: "קפטן: 2 כוסות קמח")
+    monkeypatch.setattr(service, "fetch_html", blocked)
+    service.import_recipe(UrlImport(type="url", url="https://www.tiktok.com/@a/video/1"))
+    assert model["text"] == "Post caption:\nקפטן: 2 כוסות קמח"
+
+
+def test_tiktok_page_json_caption_is_used(monkeypatch, model):
+    html = (
+        '<html><body><script id="__UNIVERSAL_DATA_FOR_REHYDRATION__">'
+        '{"itemInfo":{"itemStruct":{"desc":"פסטה \\u05e2\\u05dd עגבניות: 200 גרם פסטה\\nמבשלים"}}}'
+        "</script></body></html>"
+    )
+    service.import_recipe(
+        HtmlImport(type="html", url="https://www.tiktok.com/@a/video/1", html=html + " " * 100)
+    )
+    assert "Post caption:\nפסטה עם עגבניות: 200 גרם פסטה\nמבשלים" in model["text"]
+
+
+def test_instagram_page_json_caption():
+    html = '{"node":{"caption":{"created_at":1,"text":"עוגה: 2 \\"כוסות\\" קמח"}}}'
+    assert social.caption_from_page(html, "instagram") == 'עוגה: 2 "כוסות" קמח'
+    assert social.caption_from_page(html, "tiktok") == ""
+    assert social.caption_from_page(html, None) == ""
 
 
 def test_social_link_with_nothing_readable_asks_for_the_caption(monkeypatch, model):
@@ -144,7 +185,7 @@ def test_social_link_falls_back_to_page_preview(monkeypatch, model):
         lambda url, **kw: '<meta property="og:description" content="מתכון: קמח"><p>Log in</p>',
     )
     service.import_recipe(UrlImport(type="url", url="https://www.instagram.com/p/C1abc/"))
-    assert model["text"] == "מתכון: קמח"
+    assert model["text"] == "מתכון: קמח\n\nLog in"
 
 
 def test_blocked_site_still_imports_from_shared_text(monkeypatch, model):

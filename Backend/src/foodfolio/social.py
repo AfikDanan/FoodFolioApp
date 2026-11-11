@@ -13,13 +13,13 @@ what to tell the person. No login, cookie or private API is ever used, so
 private accounts cannot be read.
 """
 
+import json
 import logging
 import re
 from html.parser import HTMLParser
 from urllib.parse import quote, urlsplit
 
 from .errors import ApiError
-from .extract import meta_text
 from .fetch import fetch_html, fetch_json, resolve_url
 
 log = logging.getLogger(__name__)
@@ -82,7 +82,9 @@ def _instagram_caption(url: str) -> str:
     if not embed:
         return ""
     html = fetch_html(embed, timeout=_TIMEOUT_S, max_bytes=_MAX_BYTES)
-    return caption_from_embed(html) or meta_text(html)
+    # Only the caption block counts: the embed page's preview tags are generic
+    # ("Instagram"), and a non-empty but useless caption would hide the page.
+    return caption_from_embed(html)
 
 
 class _CaptionCollector(HTMLParser):
@@ -117,6 +119,27 @@ class _CaptionCollector(HTMLParser):
     def handle_data(self, data):
         if self._depth and not self._skip:
             self.parts.append(data)
+
+
+# Captions inside the JSON that TikTok and Instagram pages carry for their own
+# scripts. The visible text skips <script>, so without this a page that does
+# hold the caption (a phone-fetched TikTok page, say) looks empty.
+_PAGE_CAPTIONS = {
+    "tiktok": re.compile(r'"desc"\s*:\s*"((?:[^"\\]|\\.){10,})"'),
+    "instagram": re.compile(r'"caption"\s*:\s*\{[^{}]*?"text"\s*:\s*"((?:[^"\\]|\\.){10,})"'),
+}
+
+
+def caption_from_page(html: str, kind: str | None) -> str:
+    """The post caption from a TikTok or Instagram page's embedded JSON, if any."""
+    pattern = _PAGE_CAPTIONS.get(kind or "")
+    match = pattern.search(html) if pattern else None
+    if not match:
+        return ""
+    try:
+        return json.loads(f'"{match.group(1)}"').strip()[:MAX_CAPTION_CHARS]
+    except json.JSONDecodeError:
+        return ""
 
 
 def caption_from_embed(html: str) -> str:
