@@ -352,3 +352,21 @@ export function normalizeRecipe(row) {
     row,
   };
 }
+
+const SOURCES = [
+  [/(^|\.)instagram\.com$/, "אינסטגרם", "logo-instagram"],
+  [/(^|\.)tiktok\.com$/, "טיקטוק", "logo-tiktok"],
+  [/(^|\.)(youtube\.com|youtu\.be)$/, "יוטיוב", "logo-youtube"],
+  [/(^|\.)(facebook\.com|fb\.watch)$/, "פייסבוק", "logo-facebook"],
+];
+
+// Where a recipe was imported from, for the "open original" button.
+// Returns null when there is no usable http(s) link.
+export function sourceInfo(url) {
+  const link = String(url || "").trim();
+  const host = link.match(/^https?:\/\/(?:[^@/?#]*@)?([^/?#:]+)/i)?.[1]?.toLowerCase();
+  if (!host) return null;
+  const known = SOURCES.find(([re]) => re.test(host));
+  if (known) return { url: link, label: known[1], icon: known[2] };
+  return { url: link, label: host.replace(/^www\./, ""), icon: "link-outline" };
+}

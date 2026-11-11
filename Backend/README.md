@@ -14,9 +14,9 @@ app ──POST /import──▶ HTTP API (throttled) ──▶ Lambda ──▶ 
 `POST /import` with header `X-Install-Id` (random per install, created by the app).
 
 ```json
-{ "type": "url", "url": "https://…", "categories": ["קינוחים", "סלטים"] }
+{ "type": "url", "url": "https://…", "text": "<optional caption shared with the link>", "categories": ["קינוחים", "סלטים"] }
 { "type": "image", "image": "<base64 JPEG, ≤ 4 MB>", "categories": [] }
-{ "type": "html", "url": "https://…", "html": "<page the phone fetched>", "categories": [] }
+{ "type": "html", "url": "https://…", "html": "<page the phone fetched>", "text": "<optional>", "categories": [] }
 { "type": "text", "text": "<pasted recipe text>", "categories": [] }
 ```
 
@@ -24,9 +24,14 @@ app ──POST /import──▶ HTTP API (throttled) ──▶ Lambda ──▶ 
 
 `html` is used when a site refuses server requests (HTTP 403): the app downloads the page itself and sends it. `text` carries pasted captions.
 
+Instagram and TikTok links (`social.py`): the server has no login on those sites, so it never relies on the post page. It combines the caption the app shared along with the link, the post caption from TikTok's public oEmbed endpoint or Instagram's public embed page, and only when both are empty the page's preview tags. If nothing readable is found it answers `caption_needed` so the app can ask the person to paste the caption. Private accounts cannot be read.
+
+`POST /import-pdf` takes `{pdf: <base64, ≤ 4.4 MB>, categories[]}` and returns `{recipes: [...]}`. FoodFolio's own shared PDFs hold each recipe's data in a hidden `#FFREC1#<base64 JSON>#FFEND#` block (white text, see `util/recipeBook.js`), so they come back exactly as saved with no model call. Any other PDF's text goes to the model and yields one recipe. Scanned PDFs have no text layer; import a photo of them instead.
+
 `POST /substitute` takes `{ingredient, quantity, unit, recipe_title, other_ingredients[]}` and returns `{options: [{name, quantity, unit, note}]}` (at most 3, sized for the recipe amount).
 
 Errors are `{"error": {"code", "message"}}`: `bad_request` 400, `rate_limited` 429, `not_a_recipe` 422,
+`caption_needed` 422,
 `fetch_failed` 502, `upstream_error` 502, `internal_error` 500.
 `unit` and `department` are always values the app already knows (`src/foodfolio/schemas.py`).
 
@@ -36,8 +41,10 @@ Errors are `{"error": {"code", "message"}}`: `bad_request` 400, `rate_limited` 4
 |---|---|
 | `handler.py` | Lambda entry: routing, validation, error mapping, logging |
 | `service.py` | The use case, plus code-side clean-up of model output |
-| `fetch.py` | SSRF-safe page download |
-| `extract.py` | HTML → JSON-LD recipe or visible text (no per-site scrapers) |
+| `fetch.py` | SSRF-safe page, JSON and short-link download |
+| `pdf.py` | Recipes from shared PDFs (`pypdf`) |
+| `social.py` | Instagram and TikTok captions from public preview endpoints |
+| `extract.py` | HTML → JSON-LD recipe, or preview tags plus visible text (no per-site scrapers) |
 | `llm.py`, `prompts.py` | The only code that knows about the model |
 | `ratelimit.py` | Daily caps in DynamoDB |
 | `schemas.py`, `config.py`, `errors.py` | Shapes, settings, HTTP errors |

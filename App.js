@@ -18,6 +18,7 @@ import {
   Heebo_900Black,
 } from "@expo-google-fonts/heebo";
 import { initDB } from "./util/database";
+import { splitShared } from "./util/share";
 import { loadShoppingList } from "./util/shopping";
 import { loadMeals } from "./util/mealSettings";
 import { I18nManager } from "react-native";
@@ -49,18 +50,35 @@ const navigationRef = createNavigationContainerRef();
 // Expo Go has no native share module; only a development/production build does.
 const SHARE_INTENT_OPTIONS = { disabled: Constants.appOwnership === "expo" || Platform.OS === "web" };
 
+const fileUri = (path) => (/^[a-z]+:\/\//i.test(path) ? path : `file://${path}`);
+
 // Opens Add Recipe with whatever another app shared (a link, or text such as a caption).
 function ShareHandler({ ready }) {
   const { hasShareIntent, shareIntent, resetShareIntent } = useShareIntentContext();
   useEffect(() => {
     if (!ready || !hasShareIntent) return;
-    const link = shareIntent?.webUrl || (shareIntent?.text || "").match(/https?:\/\/\S+/)?.[0];
-    const text = shareIntent?.text?.trim();
-    if (link || text) {
-      navigationRef.navigate("AddRecipe", {
-        shared: link ? { url: link } : { text },
-        at: Date.now(),
-      });
+    // Keep the text that came with a link: for Instagram and TikTok it is often
+    // the caption, which is where the recipe is written.
+    // A PDF (FoodFolio's own recipe book, or any recipe PDF) is imported as a file.
+    const pdf = (shareIntent?.files || []).find(
+      (f) => f?.mimeType === "application/pdf" || /\.pdf$/i.test(f?.fileName || f?.path || "")
+    );
+    // Screenshots of a post (or a photo of a recipe page), up to 4.
+    const images = (shareIntent?.files || [])
+      .filter((f) => /^image\//i.test(f?.mimeType || ""))
+      .map((f) => fileUri(f.path))
+      .slice(0, 4);
+    const { url, text } = splitShared(shareIntent || {});
+    // A link wins over images: some apps attach a preview picture to a shared
+    // post, and the post (with its caption) is what the person meant to share.
+    if (url) {
+      navigationRef.navigate("AddRecipe", { shared: { url, text }, at: Date.now() });
+    } else if (pdf) {
+      navigationRef.navigate("AddRecipe", { shared: { pdf: fileUri(pdf.path) }, at: Date.now() });
+    } else if (images.length) {
+      navigationRef.navigate("AddRecipe", { shared: { images }, at: Date.now() });
+    } else if (text) {
+      navigationRef.navigate("AddRecipe", { shared: { url, text }, at: Date.now() });
     }
     resetShareIntent();
   }, [ready, hasShareIntent, shareIntent, resetShareIntent]);

@@ -141,3 +141,39 @@ def test_http_error_status(monkeypatch):
     with pytest.raises(ApiError) as err:
         fetch.fetch_html("https://example.com/a", timeout=5, max_bytes=1000)
     assert err.value.code == "fetch_failed"
+
+
+def test_fetch_json_parses_and_checks_type(monkeypatch):
+    resolves_to(monkeypatch, "93.184.216.34")
+    fake_session(
+        monkeypatch,
+        [FakeResponse(headers={"Content-Type": "application/json"}, body=b'{"title": "x"}')],
+    )
+    assert fetch.fetch_json("https://example.com/o", timeout=5, max_bytes=1000) == {"title": "x"}
+    fake_session(monkeypatch, [FakeResponse()])
+    with pytest.raises(ApiError):
+        fetch.fetch_json("https://example.com/o", timeout=5, max_bytes=1000)
+
+
+def test_resolve_url_follows_redirects_and_revalidates(monkeypatch):
+    resolves_to(monkeypatch, "93.184.216.34")
+    calls = fake_session(
+        monkeypatch,
+        [FakeResponse(301, {"Location": "https://www.example.com/v/1?x=1"}), FakeResponse()],
+    )
+    assert (
+        fetch.resolve_url("https://s.example.com/a", timeout=5) == "https://www.example.com/v/1?x=1"
+    )
+    assert len(calls) == 2
+
+
+def test_resolve_url_blocks_private_hops(monkeypatch):
+    answers = iter([["93.184.216.34"], ["10.0.0.1"]])
+    monkeypatch.setattr(
+        fetch.socket,
+        "getaddrinfo",
+        lambda h, p: [(socket.AF_INET, 0, 0, "", (next(answers)[0], p))],
+    )
+    fake_session(monkeypatch, [FakeResponse(302, {"Location": "http://intranet/"})])
+    with pytest.raises(ApiError):
+        fetch.resolve_url("https://s.example.com/a", timeout=5)

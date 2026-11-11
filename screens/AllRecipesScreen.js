@@ -18,7 +18,8 @@ import {
   fetchAllCategories,
   deleteCategoryById,
 } from "../util/database";
-import { Segmented, Chip, RecipeImage } from "../components/UI/kit";
+import { Segmented, Chip, RecipeImage, Checkbox } from "../components/UI/kit";
+import { shareRecipes } from "../util/shareRecipes";
 import getImageSource from "../util/image";
 import { C, F, SCREEN_PAD } from "../constants/theme";
 import {
@@ -41,6 +42,9 @@ function AllRecipesScreen({ navigation, route }) {
   const [query, setQuery] = useState("");
   const [catFilter, setCatFilter] = useState(null);
   const [tagFilter, setTagFilter] = useState(null);
+  // Picking recipes to share as one PDF: null when not picking, else a Set of ids.
+  const [picked, setPicked] = useState(null);
+  const [sharing, setSharing] = useState(false);
 
   const load = useCallback(async () => {
     const [r, c] = await Promise.all([
@@ -80,14 +84,50 @@ function AllRecipesScreen({ navigation, route }) {
     });
   }, [recipes, query, catFilter, tagFilter]);
 
-  const allTags = useMemo(
-    () => [...new Set(recipes.flatMap((r) => parseJsonList(r.tags)))].slice(0, 8),
-    [recipes]
-  );
+  // Every tag, most used first (no cap: a missing tag cannot be filtered on).
+  const allTags = useMemo(() => {
+    const counts = {};
+    for (const r of recipes) for (const t of parseJsonList(r.tags)) counts[t] = (counts[t] || 0) + 1;
+    return Object.keys(counts).sort((a, b) => counts[b] - counts[a] || a.localeCompare(b, "he"));
+  }, [recipes]);
+
+  const categoryCounts = useMemo(() => {
+    const counts = {};
+    for (const r of recipes) for (const c of categoryList(r)) counts[c] = (counts[c] || 0) + 1;
+    return counts;
+  }, [recipes]);
 
   const openCategory = (name) => {
     setCatFilter(name);
     setMode("all");
+  };
+
+  const togglePick = (id) =>
+    setPicked((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+
+  const allVisiblePicked = !!picked && filtered.length > 0 && filtered.every((r) => picked.has(r.id));
+
+  const pickAllVisible = () =>
+    setPicked(allVisiblePicked ? new Set() : new Set(filtered.map((r) => r.id)));
+
+  const sharePicked = async () => {
+    const rows = recipes.filter((r) => picked.has(r.id));
+    if (!rows.length || sharing) return;
+    // A whole category shared at once is titled after it.
+    const wholeCategory =
+      catFilter && rows.length === filtered.length && allVisiblePicked ? catFilter : undefined;
+    setSharing(true);
+    try {
+      await shareRecipes(rows, { title: wholeCategory });
+      setPicked(null);
+    } finally {
+      setSharing(false);
+    }
   };
 
   const confirmDeleteCategory = (cat) => {
@@ -142,18 +182,35 @@ function AllRecipesScreen({ navigation, route }) {
     <View style={styles.root}>
       <ScrollView
         style={{ flex: 1 }}
-        contentContainerStyle={[styles.content, { paddingTop: insets.top + 10 }]}
+        contentContainerStyle={[
+          styles.content,
+          { paddingTop: insets.top + 10 },
+          picked && { paddingBottom: 110 },
+        ]}
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
       >
         <View style={styles.titleRow}>
           <Text style={styles.title}>המתכונים שלי</Text>
-          <Text style={styles.count}>{recipes.length} מתכונים</Text>
+          {mode === "all" && recipes.length > 0 ? (
+            <TouchableOpacity
+              style={styles.pickToggle}
+              onPress={() => setPicked(picked ? null : new Set())}
+            >
+              <Ionicons name={picked ? "close" : "share-outline"} size={16} color={C.ink} />
+              <Text style={styles.pickToggleText}>{picked ? "ביטול" : "שיתוף כמה"}</Text>
+            </TouchableOpacity>
+          ) : (
+            <Text style={styles.count}>{recipes.length} מתכונים</Text>
+          )}
         </View>
 
         <Segmented
           value={mode}
-          onChange={setMode}
+          onChange={(m) => {
+            setMode(m);
+            setPicked(null);
+          }}
           options={[
             { key: "all", label: "כל המתכונים" },
             { key: "cats", label: "קטגוריות" },
@@ -175,22 +232,38 @@ function AllRecipesScreen({ navigation, route }) {
               />
             </View>
 
-            {(catFilter || allTags.length > 0) && (
+            {categories.length > 0 && (
               <ScrollView
                 horizontal
                 showsHorizontalScrollIndicator={false}
                 style={styles.bleed}
                 contentContainerStyle={{ paddingHorizontal: SCREEN_PAD, gap: 8 }}
               >
-                {catFilter && (
+                <Chip
+                  dark
+                  on={!catFilter}
+                  label={`הכל · ${recipes.length}`}
+                  onPress={() => setCatFilter(null)}
+                />
+                {categories.map((c) => (
                   <Chip
+                    key={c.id}
                     dark
-                    on
-                    label={catFilter}
-                    icon="close"
-                    onPress={() => setCatFilter(null)}
+                    on={catFilter === c.name}
+                    label={`${c.name} · ${categoryCounts[c.name] || 0}`}
+                    onPress={() => setCatFilter(catFilter === c.name ? null : c.name)}
                   />
-                )}
+                ))}
+              </ScrollView>
+            )}
+
+            {allTags.length > 0 && (
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                style={styles.bleed}
+                contentContainerStyle={{ paddingHorizontal: SCREEN_PAD, gap: 8 }}
+              >
                 {allTags.map((t) => (
                   <Chip
                     key={t}
@@ -211,9 +284,21 @@ function AllRecipesScreen({ navigation, route }) {
                     key={r.id}
                     activeOpacity={0.85}
                     style={styles.card}
-                    onPress={() => navigation.navigate("RecipeDisplay", { recipeId: r.id })}
+                    onPress={() =>
+                      picked
+                        ? togglePick(r.id)
+                        : navigation.navigate("RecipeDisplay", { recipeId: r.id })
+                    }
                   >
-                    <RecipeImage recipe={r} style={styles.cardImg}>
+                    <RecipeImage
+                      recipe={r}
+                      style={[styles.cardImg, picked?.has(r.id) && styles.cardImgPicked]}
+                    >
+                      {!!picked && (
+                        <View style={styles.pickBadge} pointerEvents="none">
+                          <Checkbox checked={picked.has(r.id)} onPress={() => togglePick(r.id)} />
+                        </View>
+                      )}
                       {!!recipeTimeLabel(r) && (
                         <View style={styles.timePill}>
                           <Ionicons name="time-outline" size={13} color={C.ink} />
@@ -246,6 +331,29 @@ function AllRecipesScreen({ navigation, route }) {
           </View>
         )}
       </ScrollView>
+
+      {!!picked && mode === "all" && (
+        <View style={styles.pickBar}>
+          <TouchableOpacity onPress={pickAllVisible} style={styles.pickAll}>
+            <Text style={styles.pickAllText}>{allVisiblePicked ? "ניקוי" : "בחירת הכל"}</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            activeOpacity={0.9}
+            disabled={picked.size === 0 || sharing}
+            style={[styles.pickShare, (picked.size === 0 || sharing) && { opacity: 0.4 }]}
+            onPress={sharePicked}
+          >
+            <Ionicons name="document-text-outline" size={18} color={C.white} />
+            <Text style={styles.pickShareText}>
+              {sharing
+                ? "מכין PDF…"
+                : picked.size === 0
+                  ? "בחרו מתכונים לשיתוף"
+                  : `שיתוף ${picked.size} מתכונים כ-PDF`}
+            </Text>
+          </TouchableOpacity>
+        </View>
+      )}
     </View>
   );
 }
@@ -258,6 +366,54 @@ const styles = StyleSheet.create({
   titleRow: { flexDirection: "row", alignItems: "baseline", justifyContent: "space-between" },
   title: { fontFamily: F.display900, fontSize: 30, color: C.ink },
   count: { fontFamily: F.medium, fontSize: 14, color: C.muted },
+  pickToggle: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    backgroundColor: C.card,
+    borderWidth: 1,
+    borderColor: C.line,
+    borderRadius: 999,
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+  },
+  pickToggleText: { fontFamily: F.medium, fontSize: 14, color: C.ink },
+  cardImgPicked: { borderWidth: 3, borderColor: C.accent },
+  pickBadge: {
+    position: "absolute",
+    top: 10,
+    left: 10,
+    padding: 3,
+    borderRadius: 16,
+    backgroundColor: "rgba(255,253,249,0.92)",
+  },
+  pickBar: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    bottom: 0,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    paddingHorizontal: SCREEN_PAD,
+    paddingVertical: 12,
+    backgroundColor: C.paper,
+    borderTopWidth: 1,
+    borderTopColor: C.line,
+  },
+  pickAll: { paddingVertical: 10, paddingHorizontal: 4 },
+  pickAllText: { fontFamily: F.semi, fontSize: 15, color: C.accent },
+  pickShare: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    backgroundColor: C.ink,
+    borderRadius: 14,
+    paddingVertical: 13,
+  },
+  pickShareText: { fontFamily: F.semi, fontSize: 15, color: C.white },
   searchBox: {
     height: 46,
     borderRadius: 14,

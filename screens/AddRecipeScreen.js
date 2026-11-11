@@ -19,7 +19,15 @@ import {
   fetchAllCategories,
   insertRecipeWithCategories,
 } from "../util/database";
-import { importFromUrl, importFromImage, importFromText, toDraft } from "../util/importRecipe";
+import {
+  importFromUrl,
+  importFromImages,
+  importFromPdf,
+  MAX_SCREENSHOTS,
+  importFromText,
+  toDraft,
+} from "../util/importRecipe";
+import { isSocialUrl } from "../util/share";
 import {
   displayUnit,
   formatQty,
@@ -28,8 +36,17 @@ import {
   stepsToObject,
   tintFor,
 } from "../util/recipeUtils";
-import { RoundButton, Segmented, Chip, DepartmentIcon, useToast } from "../components/UI/kit";
+import {
+  RoundButton,
+  Segmented,
+  Chip,
+  Checkbox,
+  DepartmentIcon,
+  useToast,
+} from "../components/UI/kit";
 import { C, F, SCREEN_PAD } from "../constants/theme";
+
+const SOCIAL_ERRORS = ["needs-caption", "social-no-recipe"];
 
 const STAGES = [
   "קורא את התוכן",
@@ -38,7 +55,13 @@ const STAGES = [
   "מכין את המתכון לבדיקה",
 ];
 
-const TITLES = { form: "מתכון חדש", importing: "רגע…", review: "בדיקה לפני שמירה", error: "לא זוהה מתכון" };
+const TITLES = {
+  form: "מתכון חדש",
+  importing: "רגע…",
+  review: "בדיקה לפני שמירה",
+  multi: "מתכונים מהקובץ",
+  error: "לא זוהה מתכון",
+};
 
 const ERRORS = {
   "no-recipe": { title: "לא זוהה מתכון", sub: "אפשר לנסות שוב, או להזין את המתכון ידנית." },
@@ -46,6 +69,22 @@ const ERRORS = {
   "fetch-blocked": {
     title: "האתר לא מאפשר קריאה אוטומטית",
     sub: "אפשר להעתיק את טקסט המתכון מהאתר ולהדביק אותו כאן, או לצלם מסך ולייבא כתמונה.",
+  },
+  "needs-caption": {
+    title: "לא הצלחנו לקרוא את הפוסט",
+    sub: "כנראה שזה פוסט מחשבון פרטי: גם אם אתם עוקבים אחריו, FoodFolio לא רואה אותו. צלמו מסך של הפוסט אחרי שפתחתם את הכיתוב המלא (״עוד״), ובחרו כאן את צילומי המסך, עד " + MAX_SCREENSHOTS + ".",
+  },
+  "social-no-recipe": {
+    title: "לא מצאנו מתכון בטקסט של הפוסט",
+    sub: "לפעמים המתכון נמצא בתגובות או בסרטון עצמו. צלמו מסך של המקום שבו הוא כתוב ובחרו כאן את צילומי המסך.",
+  },
+  "bad-file": {
+    title: "לא הצלחנו לקרוא את הקובץ",
+    sub: "אפשר לשתף לכאן קובץ PDF של מתכונים. אם זה PDF סרוק, צלמו אותו ויבאו כתמונה.",
+  },
+  "too-large": {
+    title: "הקובץ גדול מדי",
+    sub: "אפשר לשתף פחות מתכונים בכל פעם, או לייבא את המתכון כתמונה.",
   },
   network: { title: "אין חיבור לשרת", sub: "בדקו את החיבור לאינטרנט ונסו שוב." },
   failed: { title: "הייבוא נכשל", sub: "משהו השתבש בצד שלנו. אפשר לנסות שוב, או להזין ידנית." },
@@ -59,9 +98,12 @@ function AddRecipeScreen({ navigation, route }) {
   const [stage, setStage] = useState(0);
   const [url, setUrl] = useState("");
   const [pasted, setPasted] = useState("");
-  const [photo, setPhoto] = useState(null);
+  const [photos, setPhotos] = useState([]);
   const [manual, setManual] = useState({ title: "", ingredients: "", steps: "" });
   const [draft, setDraft] = useState(null);
+  // Several recipes from one PDF: the drafts and which of them to save.
+  const [drafts, setDrafts] = useState([]);
+  const [keep, setKeep] = useState(new Set());
   const [categories, setCategories] = useState([]);
   const [categoryId, setCategoryId] = useState(null);
   const [saving, setSaving] = useState(false);
@@ -86,11 +128,18 @@ function AddRecipeScreen({ navigation, route }) {
     if (!shared || !categoriesLoaded || handledShare.current === stamp) return;
     handledShare.current = stamp;
     const names = categories.map((c) => c.name);
-    if (shared.url) {
+    if (shared.pdf) {
+      runImport(() => importFromPdf(shared.pdf, names));
+    } else if (shared.images?.length) {
+      setTab("photo");
+      setPhotos(shared.images);
+      runImport(() => importFromImages(shared.images, names));
+    } else if (shared.url) {
       setTab("link");
       setUrl(shared.url);
-      runImport(() => importFromUrl(shared.url, names));
-    } else if (shared.text.length >= 20) {
+      setPasted(shared.text || "");
+      runImport(() => importFromUrl(shared.url, names, shared.text), shared.url);
+    } else if ((shared.text || "").length >= 20) {
       setTab("link");
       setPasted(shared.text);
       runImport(() => importFromText(shared.text, names));
@@ -100,10 +149,12 @@ function AddRecipeScreen({ navigation, route }) {
 
   const canSubmit =
     (tab === "link" && (url.trim().length > 0 || pasted.trim().length >= 20)) ||
-    (tab === "photo" && !!photo) ||
+    (tab === "photo" && photos.length > 0) ||
     (tab === "manual" && manual.title.trim().length > 0);
 
-  const runImport = async (work) => {
+  // `fromUrl` is the link being imported, used to word errors for Instagram and TikTok.
+  // `fromImages`: the link is only the source of screenshots, not what was read.
+  const runImport = async (work, fromUrl = null, { fromImages = false } = {}) => {
     setPhase("importing");
     setStage(0);
     clearInterval(stageTimer.current);
@@ -111,16 +162,31 @@ function AddRecipeScreen({ navigation, route }) {
     // we wait, but never past the last "preparing" stage until the reply lands.
     stageTimer.current = setInterval(() => setStage((s) => Math.min(s + 1, STAGES.length - 2)), 1600);
     try {
-      const result = await work();
+      let result = await work();
       clearInterval(stageTimer.current);
       setStage(STAGES.length);
-      setDraft(result);
+      if (Array.isArray(result)) {
+        if (result.length === 0) throw Object.assign(new Error("empty"), { code: "no-recipe" });
+        if (result.length > 1) {
+          setDrafts(result);
+          setKeep(new Set(result.map((_, i) => i)));
+          setPhase("multi");
+          return;
+        }
+        result = result[0];
+      }
+      setDraft({ ...result, sourceUrl: fromUrl || result.sourceUrl || null });
       const suggested = categories.find((c) => c.name === result.suggestedCategory);
       setCategoryId(suggested ? suggested.id : null);
       setPhase("review");
     } catch (e) {
       clearInterval(stageTimer.current);
-      setErrorCode(e.code || "failed");
+      const code = e.code || "failed";
+      // A social post we could read but that holds no recipe usually has it in the
+      // video or the comments: the fix is the same as for an unreadable post.
+      setErrorCode(
+        !fromImages && isSocialUrl(fromUrl) && code === "no-recipe" ? "social-no-recipe" : code
+      );
       setPhase("error");
     }
   };
@@ -130,10 +196,15 @@ function AddRecipeScreen({ navigation, route }) {
     if (tab === "link") {
       const names = categories.map((c) => c.name);
       runImport(() =>
-        url.trim() ? importFromUrl(url.trim(), names) : importFromText(pasted, names)
+        url.trim()
+          ? importFromUrl(url.trim(), names, pasted)
+          : importFromText(pasted, names),
+        url.trim() || null
       );
     } else if (tab === "photo") {
-      runImport(() => importFromImage(photo, categories.map((c) => c.name)));
+      runImport(() => importFromImages(photos, categories.map((c) => c.name)), url.trim() || null, {
+        fromImages: true,
+      });
     } else {
       const ingredients = manual.ingredients
         .split("\n")
@@ -163,11 +234,55 @@ function AddRecipeScreen({ navigation, route }) {
     const perm = fromCamera
       ? await ExpoImagePicker.requestCameraPermissionsAsync()
       : await ExpoImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!perm.granted) return;
+    if (!perm.granted) return [];
+    const room = MAX_SCREENSHOTS - (fromCamera ? photos.length : 0);
     const result = fromCamera
       ? await ExpoImagePicker.launchCameraAsync({ quality: 0.8 })
-      : await ExpoImagePicker.launchImageLibraryAsync({ quality: 0.8 });
-    if (!result.canceled) setPhoto(result.assets[0].uri);
+      : await ExpoImagePicker.launchImageLibraryAsync({
+          quality: 0.8,
+          allowsMultipleSelection: true,
+          selectionLimit: MAX_SCREENSHOTS,
+          orderedSelection: true,
+        });
+    if (result.canceled) return [];
+    const uris = result.assets.map((a) => a.uri);
+    // The camera adds a page; the gallery picks the whole set again.
+    const next = fromCamera ? [...photos, ...uris].slice(0, MAX_SCREENSHOTS) : uris.slice(0, room);
+    setPhotos(next);
+    return next;
+  };
+
+  const categoryIdFor = (d) => categories.find((c) => c.name === d.suggestedCategory)?.id;
+
+  const saveMany = async () => {
+    const chosen = drafts.filter((_, i) => keep.has(i));
+    if (!chosen.length || saving) return;
+    setSaving(true);
+    let saved = 0;
+    for (const d of chosen) {
+      try {
+        const id = categoryIdFor(d);
+        await insertRecipeWithCategories({
+          title: d.title.trim(),
+          ingredients: d.ingredients,
+          instructions: stepsToObject(d.steps),
+          totalTime: d.totalTime,
+          servings: d.servings,
+          tags: d.tags,
+          fridgeDays: d.fridgeDays,
+          estimatedIdx: d.estimatedIdx,
+          sourceUrl: d.sourceUrl || null,
+          categoryIds: id ? [id] : [],
+        });
+        saved += 1;
+      } catch (e) {
+        console.error("Error saving recipe from PDF:", e);
+      }
+    }
+    toast(
+      saved === chosen.length ? `${saved} מתכונים נשמרו` : `נשמרו ${saved} מתוך ${chosen.length} מתכונים`
+    );
+    navigation.reset({ index: 0, routes: [{ name: "Home", params: { screen: "All Recipes" } }] });
   };
 
   const save = async () => {
@@ -183,6 +298,7 @@ function AddRecipeScreen({ navigation, route }) {
         tags: draft.tags,
         fridgeDays: draft.fridgeDays,
         estimatedIdx: draft.estimatedIdx,
+        sourceUrl: draft.sourceUrl || null,
         categoryIds: categoryId ? [categoryId] : [],
       });
       const cat = categories.find((c) => c.id === categoryId);
@@ -196,6 +312,19 @@ function AddRecipeScreen({ navigation, route }) {
       setSaving(false);
       toast("השמירה נכשלה, נסו שוב");
     }
+  };
+
+  // Private or unreadable post: neither app lets you copy a caption, so the
+  // person screenshots the post and picks the screenshots here. The link is
+  // kept as the recipe's source.
+  const importScreenshots = async () => {
+    setTab("photo");
+    const picked = await pickPhoto(false);
+    if (!picked?.length) return; // cancelled: stay on this screen
+    const link = url.trim() || null;
+    runImport(() => importFromImages(picked, categories.map((c) => c.name)), link, {
+      fromImages: true,
+    });
   };
 
   const resetToForm = (nextTab) => {
@@ -257,7 +386,7 @@ function AddRecipeScreen({ navigation, route }) {
                   style={styles.pasteBox}
                   value={pasted}
                   onChangeText={setPasted}
-                  placeholder="או הדביקו כאן את טקסט המתכון (למשל הכיתוב של סרטון)"
+                  placeholder="טקסט המתכון או הכיתוב של הסרטון (אפשר גם יחד עם הקישור)"
                   placeholderTextColor={C.faint}
                   multiline
                 />
@@ -267,8 +396,9 @@ function AddRecipeScreen({ navigation, route }) {
                     <Text style={styles.videoTitle}>מתכונים מסרטונים</Text>
                   </View>
                   <Text style={styles.videoText}>
-                    אפשר להדביק את הקישור לסרטון, ואם המתכון כתוב בכיתוב של הסרטון (באינסטגרם או
-                    בטיקטוק) להעתיק אותו ולהדביק בשדה שלמעלה.
+                    הכי פשוט: לשתף את הסרטון מאינסטגרם או מטיקטוק ישירות ל-FoodFolio. אם הייבוא לא
+                    מצליח (למשל בחשבון פרטי), פותחים את הכיתוב המלא, מצלמים מסך ומשתפים את צילומי
+                    המסך ל-FoodFolio, עד {MAX_SCREENSHOTS}.
                   </Text>
                 </View>
               </>
@@ -281,22 +411,36 @@ function AddRecipeScreen({ navigation, route }) {
                   style={styles.dropzone}
                   onPress={() => pickPhoto(true)}
                 >
-                  {photo ? (
-                    <Image source={{ uri: photo }} style={styles.preview} resizeMode="cover" />
+                  {photos.length > 0 ? (
+                    <>
+                      <Image source={{ uri: photos[0] }} style={styles.preview} resizeMode="cover" />
+                      {photos.length > 1 && (
+                        <View style={styles.photoCount}>
+                          <Text style={styles.photoCountText}>{photos.length} תמונות</Text>
+                        </View>
+                      )}
+                    </>
                   ) : (
                     <>
                       <Ionicons name="camera-outline" size={34} color={C.muted} />
                       <Text style={styles.dropTitle}>צילום דף מתכון</Text>
                       <Text style={styles.dropSub}>
-                        ספר בישול, מחברת בכתב יד או צילום מסך.
+                        ספר בישול, מחברת בכתב יד או צילומי מסך (עד {MAX_SCREENSHOTS}).
                       </Text>
                     </>
                   )}
                 </TouchableOpacity>
                 <TouchableOpacity style={styles.secondary} onPress={() => pickPhoto(false)}>
                   <Ionicons name="images-outline" size={18} color={C.ink} />
-                  <Text style={styles.secondaryText}>בחירה מהגלריה</Text>
+                  <Text style={styles.secondaryText}>
+                    בחירה מהגלריה (אפשר כמה צילומי מסך)
+                  </Text>
                 </TouchableOpacity>
+                {photos.length > 0 && (
+                  <TouchableOpacity style={{ alignSelf: "center" }} onPress={() => setPhotos([])}>
+                    <Text style={styles.pasteLink}>ניקוי התמונות</Text>
+                  </TouchableOpacity>
+                )}
               </>
             )}
 
@@ -368,9 +512,20 @@ function AddRecipeScreen({ navigation, route }) {
           <Ionicons name="alert-circle-outline" size={44} color={C.warnText} />
           <Text style={styles.errorTitle}>{ERRORS[errorCode]?.title || ERRORS.failed.title}</Text>
           <Text style={styles.errorSub}>{ERRORS[errorCode]?.sub || ERRORS.failed.sub}</Text>
-          <TouchableOpacity style={styles.primarySmall} onPress={() => resetToForm()}>
-            <Text style={styles.primarySmallText}>נסו שוב</Text>
-          </TouchableOpacity>
+          {SOCIAL_ERRORS.includes(errorCode) ? (
+            <>
+              <TouchableOpacity style={styles.primarySmall} onPress={importScreenshots}>
+                <Text style={styles.primarySmallText}>בחירת צילומי מסך</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.secondary} onPress={() => resetToForm()}>
+                <Text style={styles.secondaryText}>נסו שוב</Text>
+              </TouchableOpacity>
+            </>
+          ) : (
+            <TouchableOpacity style={styles.primarySmall} onPress={() => resetToForm()}>
+              <Text style={styles.primarySmallText}>נסו שוב</Text>
+            </TouchableOpacity>
+          )}
           <TouchableOpacity style={styles.secondary} onPress={() => resetToForm("manual")}>
             <Text style={styles.secondaryText}>הזנה ידנית</Text>
           </TouchableOpacity>
@@ -451,6 +606,61 @@ function AddRecipeScreen({ navigation, route }) {
             <Text style={styles.meta}>{draft.steps.length} שלבי הכנה זוהו</Text>
           </ScrollView>
           <Cta label="שמירה למתכונים" onPress={save} disabled={!draft.title.trim() || saving} bottom={insets.bottom} />
+        </>
+      )}
+
+      {phase === "multi" && (
+        <>
+          <ScrollView style={{ flex: 1 }} contentContainerStyle={styles.body}>
+            <View style={styles.labelRow}>
+              <Text style={styles.label}>נמצאו {drafts.length} מתכונים</Text>
+              <TouchableOpacity
+                onPress={() =>
+                  setKeep(keep.size === drafts.length ? new Set() : new Set(drafts.map((_, i) => i)))
+                }
+              >
+                <Text style={styles.pasteLink}>
+                  {keep.size === drafts.length ? "ניקוי" : "בחירת הכל"}
+                </Text>
+              </TouchableOpacity>
+            </View>
+            <Text style={styles.meta}>
+              כל מתכון יישמר בקטגוריה שלו אם יש לכם קטגוריה בשם הזה. אפשר לערוך כל מתכון אחרי השמירה.
+            </Text>
+            {drafts.map((d, i) => {
+              const toggle = () =>
+                setKeep((prev) => {
+                  const next = new Set(prev);
+                  if (next.has(i)) next.delete(i);
+                  else next.add(i);
+                  return next;
+                });
+              const cat = categories.find((c) => c.id === categoryIdFor(d));
+              return (
+                <TouchableOpacity key={i} activeOpacity={0.8} style={styles.multiRow} onPress={toggle}>
+                  <Checkbox checked={keep.has(i)} onPress={toggle} />
+                  <View style={{ flex: 1, gap: 2 }}>
+                    <Text style={styles.multiTitle}>{d.title}</Text>
+                    <Text style={styles.meta}>
+                      {[
+                        cat?.name,
+                        `${d.ingredients.length} מרכיבים`,
+                        `${d.steps.length} שלבים`,
+                      ]
+                        .filter(Boolean)
+                        .join(" · ")}
+                    </Text>
+                  </View>
+                </TouchableOpacity>
+              );
+            })}
+          </ScrollView>
+          <Cta
+            label={keep.size ? `שמירת ${keep.size} מתכונים` : "בחרו מתכון אחד לפחות"}
+            onPress={saveMany}
+            disabled={keep.size === 0 || saving}
+            bottom={insets.bottom}
+          />
         </>
       )}
     </View>
@@ -622,6 +832,27 @@ const styles = StyleSheet.create({
     paddingVertical: 4,
   },
   meta: { fontFamily: F.body, fontSize: 13, color: C.muted },
+  photoCount: {
+    position: "absolute",
+    bottom: 10,
+    right: 10,
+    backgroundColor: "rgba(29,29,27,0.75)",
+    borderRadius: 999,
+    paddingVertical: 4,
+    paddingHorizontal: 10,
+  },
+  photoCountText: { fontFamily: F.semi, fontSize: 13, color: C.white },
+  multiRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    backgroundColor: C.card,
+    borderWidth: 1,
+    borderColor: C.line,
+    borderRadius: 14,
+    padding: 14,
+  },
+  multiTitle: { fontFamily: F.semi, fontSize: 16, color: C.ink },
   wrap: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
   card: { backgroundColor: C.card, borderRadius: 16, borderWidth: 1, borderColor: C.line },
   ingRow: { flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 11, paddingHorizontal: 14 },
