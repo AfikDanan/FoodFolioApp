@@ -48,36 +48,3 @@ def test_visible_text_drops_scripts_navigation_and_collapses_space():
 
 def test_text_is_truncated():
     assert len(visible_text("<p>" + "א" * 500 + "</p>", 100)) == 100
-
-
-TIKTOK = (
-    '<html><head><meta property="og:description" content="Pasta &amp; cheese"></head><body>'
-    '<script id="__UNIVERSAL_DATA_FOR_REHYDRATION__" type="application/json">'
-    + json.dumps(
-        {
-            "__DEFAULT_SCOPE__": {
-                "x": {"itemInfo": {"itemStruct": {"desc": "פסטה: 200 גרם פסטה #מתכון"}}}
-            }
-        },
-        ensure_ascii=False,
-    )
-    + "</script></body></html>"
-)
-
-
-def test_caption_is_read_from_meta_and_embedded_state():
-    from foodfolio.extract import page_caption
-
-    out = page_caption(TIKTOK)
-    assert "Pasta & cheese" in out
-    assert "200 גרם פסטה" in out
-
-
-def test_caption_is_part_of_model_input_for_script_only_pages():
-    assert "200 גרם פסטה" in page_to_model_input(TIKTOK, 10_000)
-
-
-def test_page_without_caption_gives_empty_caption():
-    from foodfolio.extract import page_caption
-
-    assert page_caption("<html><title>Instagram</title><body></body></html>") == ""

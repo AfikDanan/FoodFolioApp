@@ -107,12 +107,41 @@ def test_empty_page_is_not_a_recipe(monkeypatch):
 
 def test_image_must_be_valid_and_small(monkeypatch):
     good = base64.b64encode(b"\xff\xd8" + b"0" * 200).decode()
-    assert service._checked_image(ImageImport(type="image", image=good)) == good
+    assert service._checked_images(ImageImport(type="image", image=good)) == [good]
     with pytest.raises(ApiError):
-        service._checked_image(ImageImport(type="image", image="!" * 200))
+        service._checked_images(ImageImport(type="image", image="!" * 200))
     big = base64.b64encode(b"0" * 5_000_000).decode()
     with pytest.raises(ApiError):
-        service._checked_image(ImageImport(type="image", image=big))
+        service._checked_images(ImageImport(type="image", image=big))
+
+
+def test_several_screenshots_share_one_size_budget():
+    part = base64.b64encode(b"0" * 1_500_000).decode()
+    ok = ImageImport(type="image", images=[part, part])
+    assert service._checked_images(ok) == [part, part]
+    with pytest.raises(ApiError):
+        service._checked_images(ImageImport(type="image", images=[part, part, part]))
+
+
+def test_image_import_needs_an_image_and_at_most_four():
+    good = base64.b64encode(b"\xff\xd8" + b"0" * 200).decode()
+    with pytest.raises(ValueError):
+        ImageImport(type="image")
+    with pytest.raises(ValueError):
+        ImageImport(type="image", images=[good] * 5)
+
+
+def test_screenshots_all_reach_the_model(monkeypatch):
+    seen = {}
+
+    def fake_extract(*, text, image_b64, categories):
+        seen["images"] = image_b64
+        return model_recipe()
+
+    monkeypatch.setattr(service.llm, "extract_recipe", fake_extract)
+    good = base64.b64encode(b"\xff\xd8" + b"0" * 200).decode()
+    service.import_recipe(ImageImport(type="image", images=[good, good]))
+    assert seen["images"] == [good, good]
 
 
 def test_source_host_never_leaks_the_query():
@@ -211,14 +240,3 @@ def test_pasted_text_goes_straight_to_the_model(monkeypatch):
     monkeypatch.setattr(service.llm, "extract_recipe", fake_extract)
     service.import_recipe(TextImport(type="text", text="מרכיבים: 2 כוסות קמח. מערבבים ואופים."))
     assert seen["text"].startswith("מרכיבים") and seen["image"] is None
-
-
-def test_social_link_without_caption_asks_for_pasted_text(monkeypatch):
-    monkeypatch.setattr(
-        service, "fetch_html", lambda url, **kw: "<html><title>Instagram</title></html>"
-    )
-    with pytest.raises(ApiError) as err:
-        service.import_recipe(
-            UrlImport(type="url", url="https://www.instagram.com/reel/abc/", categories=[])
-        )
-    assert err.value.code == "no_caption"

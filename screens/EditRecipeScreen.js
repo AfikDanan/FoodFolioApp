@@ -50,6 +50,7 @@ function EditRecipeScreen({ navigation, route }) {
     totalTime: "",
     servings: 4,
     image: null,
+    sourceUrl: "",
     ingredients: "",
     steps: "",
   });
@@ -71,6 +72,7 @@ function EditRecipeScreen({ navigation, route }) {
         totalTime: recipe.totalTime || "",
         servings: recipe.servings || 4,
         image: recipe.image,
+        sourceUrl: recipe.source_url || "",
         ingredients: ings.map(ingredientLine).join("\n"),
         steps: parseSteps(recipe.instructions).join("\n"),
       });
@@ -108,6 +110,7 @@ function EditRecipeScreen({ navigation, route }) {
         image: form.image,
         totalTime: form.totalTime.trim() || "לא צוין",
         servings: form.servings,
+        sourceUrl: form.sourceUrl.trim() || null,
       },
       selected
     );
@@ -155,6 +158,13 @@ function EditRecipeScreen({ navigation, route }) {
 
         <Field label="שם המתכון" value={form.title} onChangeText={set("title")} />
         <Field label="זמן כולל" value={form.totalTime} onChangeText={set("totalTime")} />
+        <Field
+          label="קישור למתכון המקורי"
+          value={form.sourceUrl}
+          onChangeText={set("sourceUrl")}
+          placeholder="https://"
+          url
+        />
         <View style={styles.servingsRow}>
           <Text style={styles.label}>מנות</Text>
           <Stepper value={form.servings} onChange={set("servings")} />
@@ -197,7 +207,7 @@ function EditRecipeScreen({ navigation, route }) {
   );
 }
 
-function Field({ label, value, onChangeText, height }) {
+function Field({ label, value, onChangeText, height, placeholder, url }) {
   return (
     <View style={{ gap: 6 }}>
       <Text style={styles.label}>{label}</Text>
@@ -206,6 +216,9 @@ function Field({ label, value, onChangeText, height }) {
         value={value}
         onChangeText={onChangeText}
         multiline={!!height}
+        placeholder={placeholder}
+        placeholderTextColor={C.faint}
+        {...(url ? { autoCapitalize: "none", autoCorrect: false, keyboardType: "url" } : null)}
       />
     </View>
   );

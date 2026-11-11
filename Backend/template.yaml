@@ -71,6 +71,12 @@ Resources:
             ApiId: !Ref Api
             Method: POST
             Path: /substitute
+        ImportPdf:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref Api
+            Method: POST
+            Path: /import-pdf
 
   Api:
     Type: AWS::Serverless::HttpApi

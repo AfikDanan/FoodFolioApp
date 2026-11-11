@@ -64,15 +64,21 @@ def _parse(*, instructions: str, content: list, schema: type[BaseModel], max_tok
 
 
 def extract_recipe(
-    *, text: str | None, image_b64: str | None, categories: list[str]
+    *, text: str | None, image_b64: str | list[str] | None, categories: list[str]
 ) -> ModelRecipe:
-    """Ask the model for a structured recipe from page text or a photo."""
-    content = [{"type": "input_text", "text": build_user_text(content=text, categories=categories)}]
-    if image_b64:
+    """Ask the model for a structured recipe from page text or photos."""
+    images = [image_b64] if isinstance(image_b64, str) else list(image_b64 or [])
+    content = [
+        {
+            "type": "input_text",
+            "text": build_user_text(content=text, categories=categories, photos=len(images)),
+        }
+    ]
+    for image in images:
         content.append(
             {
                 "type": "input_image",
-                "image_url": f"data:image/jpeg;base64,{image_b64}",
+                "image_url": f"data:image/jpeg;base64,{image}",
                 "detail": "high",
             }
         )

@@ -1,4 +1,5 @@
 import { manipulateAsync, SaveFormat } from "expo-image-manipulator";
+import * as FileSystem from "expo-file-system/legacy";
 import { departments } from "../constants/recipeConstants";
 import { apiPost, ApiError } from "./api";
 import { guessDepartment, parseSteps } from "./recipeUtils";
@@ -12,7 +13,7 @@ const departmentNames = departments.map((d) => d.name);
 // the review step and the database both understand.
 export function toDraft(raw) {
   const minutes = raw.total_minutes;
-  const totalTime = raw.totalTime || (minutes ? `${minutes} דקות` : "לא צוין");
+  const totalTime = raw.totalTime || raw.total_time || (minutes ? `${minutes} דקות` : "לא צוין");
   return {
     title: String(raw.title || "").trim(),
     totalTime,
@@ -36,6 +37,7 @@ export function toDraft(raw) {
       .map((i, idx) => (i.estimated ? idx : null))
       .filter((idx) => idx !== null),
     steps: Array.isArray(raw.steps) ? raw.steps.map(String) : parseSteps(raw.instructions),
+    sourceUrl: raw.source_url || raw.sourceUrl || null,
   };
 }
 
@@ -63,13 +65,16 @@ async function fetchPageOnDevice(url) {
   }
 }
 
-export async function importFromUrl(url, categories = []) {
+// `text` is optional: a caption shared or pasted along with the link.
+export async function importFromUrl(url, categories = [], text = "") {
+  const caption = String(text || "").trim().slice(0, 30000);
+  const extra = caption ? { text: caption } : {};
   try {
-    return await postImport({ type: "url", url: String(url), categories });
+    return await postImport({ type: "url", url: String(url), categories, ...extra });
   } catch (e) {
     if (e.code !== "fetch-blocked") throw e;
     const html = await fetchPageOnDevice(String(url));
-    return postImport({ type: "html", url: String(url), html, categories });
+    return postImport({ type: "html", url: String(url), html, categories, ...extra });
   }
 }
 
@@ -85,4 +90,36 @@ export async function importFromImage(uri, categories = []) {
     base64: true,
   });
   return postImport({ type: "image", image: base64, categories });
+}
+
+export const MAX_SCREENSHOTS = 4;
+
+// Several screenshots of one post (the caption, the rest of it, a comment with
+// the recipe). Phone screenshots are already about 1080 px wide, so they are
+// only recompressed, at that width, to keep the upload small.
+export async function importFromImages(uris, categories = []) {
+  const list = uris.slice(0, MAX_SCREENSHOTS);
+  if (list.length === 1) return importFromImage(list[0], categories);
+  const images = [];
+  for (const uri of list) {
+    const { base64 } = await manipulateAsync(uri, [{ resize: { width: 1080 } }], {
+      compress: 0.6,
+      format: SaveFormat.JPEG,
+      base64: true,
+    });
+    images.push(base64);
+  }
+  return postImport({ type: "image", images, categories });
+}
+
+// The API takes a 6 MB body; base64 makes a file a third larger.
+const MAX_PDF_BASE64 = 5_900_000;
+
+// A PDF shared into the app. FoodFolio's own PDFs can hold many recipes, and come
+// back exactly as they were saved; any other PDF yields one recipe.
+export async function importFromPdf(uri, categories = []) {
+  const pdf = await FileSystem.readAsStringAsync(uri, { encoding: "base64" });
+  if (pdf.length > MAX_PDF_BASE64) throw new ApiError("too-large", "pdf");
+  const data = await apiPost("/import-pdf", { pdf, categories });
+  return (data.recipes || []).map(toDraft);
 }

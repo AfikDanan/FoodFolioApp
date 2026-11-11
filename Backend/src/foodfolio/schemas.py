@@ -6,7 +6,7 @@ two in sync: the app shows exactly the strings returned here.
 
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 UNITS = (
     "מיליליטר",
@@ -82,17 +82,35 @@ class ModelRecipe(BaseModel):
 class UrlImport(BaseModel):
     type: Literal["url"]
     url: Annotated[str, Field(min_length=8, max_length=2048)]
+    # Text the other app shared along with the link (an Instagram or TikTok caption).
+    text: Annotated[str, Field(max_length=30_000)] | None = None
     categories: list[Annotated[str, Field(max_length=40)]] = Field(
         default_factory=list, max_length=30
     )
+
+
+Base64Image = Annotated[str, Field(min_length=100)]  # base64 JPEG/PNG
 
 
 class ImageImport(BaseModel):
+    """A photo of a recipe, or up to 4 screenshots of one post (caption, comments...)."""
+
     type: Literal["image"]
-    image: Annotated[str, Field(min_length=100)]  # base64 JPEG/PNG
+    image: Base64Image | None = None
+    images: list[Base64Image] = Field(default_factory=list, max_length=4)
     categories: list[Annotated[str, Field(max_length=40)]] = Field(
         default_factory=list, max_length=30
     )
+
+    @model_validator(mode="after")
+    def _has_an_image(self):
+        if not self.image and not self.images:
+            raise ValueError("image or images is required")
+        return self
+
+    @property
+    def all_images(self) -> list[str]:
+        return ([self.image] if self.image else []) + self.images
 
 
 class HtmlImport(BaseModel):
@@ -101,6 +119,8 @@ class HtmlImport(BaseModel):
     type: Literal["html"]
     url: Annotated[str, Field(min_length=8, max_length=2048)]
     html: Annotated[str, Field(min_length=100, max_length=2_000_000)]
+    # Text the other app shared along with the link (an Instagram or TikTok caption).
+    text: Annotated[str, Field(max_length=30_000)] | None = None
     categories: list[Annotated[str, Field(max_length=40)]] = Field(
         default_factory=list, max_length=30
     )
@@ -111,6 +131,15 @@ class TextImport(BaseModel):
 
     type: Literal["text"]
     text: Annotated[str, Field(min_length=20, max_length=30_000)]
+    categories: list[Annotated[str, Field(max_length=40)]] = Field(
+        default_factory=list, max_length=30
+    )
+
+
+class PdfImport(BaseModel):
+    """A PDF shared into the app: FoodFolio's own recipe book, or any recipe PDF."""
+
+    pdf: Annotated[str, Field(min_length=100, max_length=6_000_000)]  # base64
     categories: list[Annotated[str, Field(max_length=40)]] = Field(
         default_factory=list, max_length=30
     )
@@ -139,6 +168,9 @@ class Recipe(BaseModel):
     tags: list[str]
     fridge_days: int | None
     suggested_category: str | None
+    # Only set for recipes read back from a FoodFolio PDF.
+    total_time: str | None = None
+    source_url: str | None = None
 
 
 # --- Substitutions -----------------------------------------------------------
@@ -170,4 +202,3 @@ class Substitute(BaseModel):
     quantity: float
     unit: AppUnit
     note: str
-

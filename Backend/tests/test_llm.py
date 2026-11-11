@@ -93,3 +93,12 @@ def test_substitute_request_uses_its_own_prompt_and_budget(monkeypatch):
     assert kw["max_output_tokens"] <= 1000
     text = kw["input"][0]["content"][0]["text"]
     assert "שמן" in text and "קמח" in text
+
+
+def test_screenshots_are_sent_in_order(monkeypatch):
+    responses = FakeResponses(FakeResult("parsed"))
+    use_client(monkeypatch, responses)
+    llm.extract_recipe(text=None, image_b64=["QUFB", "QkJC"], categories=[])
+    parts = responses.kwargs["input"][0]["content"]
+    assert [p["image_url"][-4:] for p in parts[1:]] == ["QUFB", "QkJC"]
+    assert "2 attached photos" in parts[0]["text"]

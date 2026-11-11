@@ -19,8 +19,9 @@ def not_a_recipe() -> ApiError:
     return ApiError(422, "not_a_recipe", "No recipe could be found in the input.")
 
 
-def no_caption() -> ApiError:
-    return ApiError(422, "no_caption", "The post's caption could not be read from the link.")
+def caption_needed() -> ApiError:
+    """A social post whose caption we could not read: the person can paste it."""
+    return ApiError(422, "caption_needed", "The post could not be read; paste its caption.")
 
 
 def fetch_failed(message: str) -> ApiError:
