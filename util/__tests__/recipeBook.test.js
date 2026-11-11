@@ -113,7 +113,24 @@ describe("recipesToHtml", () => {
   // Writes the HTML for the backend's PDF fixture: FF_BOOK_HTML=/path npx jest recipeBook
   if (process.env.FF_BOOK_HTML) {
     it("writes the fixture html", () => {
-      require("fs").writeFileSync(process.env.FF_BOOK_HTML, recipesToHtml(ROWS));
+      const fs = require("fs");
+      const font = (w, name) => [
+        w,
+        `data:font/ttf;base64,${fs
+          .readFileSync(require.resolve(`@expo-google-fonts/heebo/${name}/Heebo_${name}.ttf`))
+          .toString("base64")}`,
+      ];
+      const fonts = Object.fromEntries([
+        font(400, "400Regular"),
+        font(500, "500Medium"),
+        font(600, "600SemiBold"),
+        font(700, "700Bold"),
+        font(900, "900Black"),
+      ]);
+      const photo = process.env.FF_BOOK_PHOTO;
+      const images = photo ? { 1: `data:image/jpeg;base64,${fs.readFileSync(photo).toString("base64")}` } : {};
+      fs.writeFileSync(process.env.FF_BOOK_HTML, recipesToHtml(ROWS, { fonts, images }));
+      fs.writeFileSync(`${process.env.FF_BOOK_HTML}.single.html`, recipesToHtml([ROWS[0]], { fonts, images }));
     });
   }
 });
