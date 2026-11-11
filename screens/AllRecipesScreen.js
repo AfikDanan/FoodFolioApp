@@ -80,10 +80,18 @@ function AllRecipesScreen({ navigation, route }) {
     });
   }, [recipes, query, catFilter, tagFilter]);
 
-  const allTags = useMemo(
-    () => [...new Set(recipes.flatMap((r) => parseJsonList(r.tags)))].slice(0, 8),
-    [recipes]
-  );
+  // Every tag, most used first (no cap: a missing tag cannot be filtered on).
+  const allTags = useMemo(() => {
+    const counts = {};
+    for (const r of recipes) for (const t of parseJsonList(r.tags)) counts[t] = (counts[t] || 0) + 1;
+    return Object.keys(counts).sort((a, b) => counts[b] - counts[a] || a.localeCompare(b, "he"));
+  }, [recipes]);
+
+  const categoryCounts = useMemo(() => {
+    const counts = {};
+    for (const r of recipes) for (const c of categoryList(r)) counts[c] = (counts[c] || 0) + 1;
+    return counts;
+  }, [recipes]);
 
   const openCategory = (name) => {
     setCatFilter(name);
@@ -175,22 +183,38 @@ function AllRecipesScreen({ navigation, route }) {
               />
             </View>
 
-            {(catFilter || allTags.length > 0) && (
+            {categories.length > 0 && (
               <ScrollView
                 horizontal
                 showsHorizontalScrollIndicator={false}
                 style={styles.bleed}
                 contentContainerStyle={{ paddingHorizontal: SCREEN_PAD, gap: 8 }}
               >
-                {catFilter && (
+                <Chip
+                  dark
+                  on={!catFilter}
+                  label={`הכל · ${recipes.length}`}
+                  onPress={() => setCatFilter(null)}
+                />
+                {categories.map((c) => (
                   <Chip
+                    key={c.id}
                     dark
-                    on
-                    label={catFilter}
-                    icon="close"
-                    onPress={() => setCatFilter(null)}
+                    on={catFilter === c.name}
+                    label={`${c.name} · ${categoryCounts[c.name] || 0}`}
+                    onPress={() => setCatFilter(catFilter === c.name ? null : c.name)}
                   />
-                )}
+                ))}
+              </ScrollView>
+            )}
+
+            {allTags.length > 0 && (
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                style={styles.bleed}
+                contentContainerStyle={{ paddingHorizontal: SCREEN_PAD, gap: 8 }}
+              >
                 {allTags.map((t) => (
                   <Chip
                     key={t}
