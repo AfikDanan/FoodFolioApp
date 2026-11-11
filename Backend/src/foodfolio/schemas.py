@@ -82,6 +82,8 @@ class ModelRecipe(BaseModel):
 class UrlImport(BaseModel):
     type: Literal["url"]
     url: Annotated[str, Field(min_length=8, max_length=2048)]
+    # Text the other app shared along with the link (an Instagram or TikTok caption).
+    text: Annotated[str, Field(max_length=30_000)] | None = None
     categories: list[Annotated[str, Field(max_length=40)]] = Field(
         default_factory=list, max_length=30
     )
@@ -101,6 +103,8 @@ class HtmlImport(BaseModel):
     type: Literal["html"]
     url: Annotated[str, Field(min_length=8, max_length=2048)]
     html: Annotated[str, Field(min_length=100, max_length=2_000_000)]
+    # Text the other app shared along with the link (an Instagram or TikTok caption).
+    text: Annotated[str, Field(max_length=30_000)] | None = None
     categories: list[Annotated[str, Field(max_length=40)]] = Field(
         default_factory=list, max_length=30
     )

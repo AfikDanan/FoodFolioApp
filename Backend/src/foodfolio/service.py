@@ -7,8 +7,8 @@ from urllib.parse import urlsplit
 
 from . import llm
 from .config import get_settings
-from .errors import bad_request, not_a_recipe
-from .extract import page_to_model_input
+from .errors import ApiError, bad_request, caption_needed, not_a_recipe
+from .extract import meta_text, page_to_model_input
 from .fetch import fetch_html
 from .schemas import (
     APP_UNIT,
@@ -22,6 +22,8 @@ from .schemas import (
     TextImport,
     UrlImport,
 )
+from .social import fetch_caption
+from .social import platform as social_platform
 
 MAX_INGREDIENTS = 80
 MAX_STEPS = 60
@@ -33,15 +35,7 @@ _STEP_NUMBER = re.compile(r"^\s*(?:\d+\s*[.)]|[-•*])\s*")
 def import_recipe(request: ImportRequest) -> Recipe:
     settings = get_settings()
     if isinstance(request, UrlImport | HtmlImport):
-        if isinstance(request, UrlImport):
-            html = fetch_html(
-                request.url, timeout=settings.fetch_timeout_s, max_bytes=settings.fetch_max_bytes
-            )
-        else:
-            html = request.html
-        text = page_to_model_input(html, settings.max_page_chars)
-        if not text.strip():
-            raise not_a_recipe()
+        text = _link_text(request, settings.max_page_chars)
         raw = llm.extract_recipe(text=text, image_b64=None, categories=request.categories)
     elif isinstance(request, TextImport):
         raw = llm.extract_recipe(
@@ -54,6 +48,47 @@ def import_recipe(request: ImportRequest) -> Recipe:
             text=None, image_b64=_checked_image(request), categories=request.categories
         )
     return clean_recipe(raw, request.categories)
+
+
+def _link_text(request: UrlImport | HtmlImport, limit: int) -> str:
+    """Everything we can learn about a link, as one text for the model.
+
+    Sources, in order: the caption the other app shared with the link, the post
+    caption read from Instagram or TikTok, and the page itself. A social post page
+    is a login wall for a server, so it is only read when nothing else worked.
+    """
+    settings = get_settings()
+    shared = (request.text or "").replace(request.url, "").strip()
+    social = social_platform(request.url)
+    caption = fetch_caption(request.url) if social and isinstance(request, UrlImport) else ""
+
+    page = ""
+    if isinstance(request, HtmlImport):
+        page = page_to_model_input(request.html, limit)
+    elif not social or not (shared or caption):
+        try:
+            html = fetch_html(
+                request.url, timeout=settings.fetch_timeout_s, max_bytes=settings.fetch_max_bytes
+            )
+            page = meta_text(html) if social else page_to_model_input(html, limit)
+        except ApiError:
+            # With shared text in hand we can still try; otherwise let the app
+            # fall back to fetching the page on the phone.
+            if not shared:
+                raise
+
+    parts = []
+    for label, value in (("Shared text", shared), ("Post caption", caption), ("Page", page)):
+        value = value.strip()
+        if value and not any(value in seen for _, seen in parts):
+            parts.append((label, value))
+    if not parts:
+        if social:
+            raise caption_needed()
+        raise not_a_recipe()
+    if len(parts) == 1 and parts[0][0] == "Page":
+        return parts[0][1][:limit]
+    return "\n\n".join(f"{label}:\n{value}" for label, value in parts)[:limit]
 
 
 def _checked_image(request: ImageImport) -> str:

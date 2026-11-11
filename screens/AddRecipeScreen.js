@@ -20,6 +20,7 @@ import {
   insertRecipeWithCategories,
 } from "../util/database";
 import { importFromUrl, importFromImage, importFromText, toDraft } from "../util/importRecipe";
+import { isSocialUrl } from "../util/share";
 import {
   displayUnit,
   formatQty,
@@ -46,6 +47,14 @@ const ERRORS = {
   "fetch-blocked": {
     title: "האתר לא מאפשר קריאה אוטומטית",
     sub: "אפשר להעתיק את טקסט המתכון מהאתר ולהדביק אותו כאן, או לצלם מסך ולייבא כתמונה.",
+  },
+  "needs-caption": {
+    title: "לא הצלחנו לקרוא את הפוסט",
+    sub: "פתחו את הפוסט באינסטגרם או בטיקטוק, העתיקו את הטקסט שמתחת לסרטון והדביקו אותו כאן. פוסט מחשבון פרטי אי אפשר לקרוא.",
+  },
+  "social-no-recipe": {
+    title: "לא מצאנו מתכון בטקסט של הפוסט",
+    sub: "לפעמים המתכון נמצא בתגובות או בסרטון עצמו. אפשר להעתיק אותו ולהדביק כאן, או לצלם מסך ולייבא כתמונה.",
   },
   network: { title: "אין חיבור לשרת", sub: "בדקו את החיבור לאינטרנט ונסו שוב." },
   failed: { title: "הייבוא נכשל", sub: "משהו השתבש בצד שלנו. אפשר לנסות שוב, או להזין ידנית." },
@@ -89,8 +98,9 @@ function AddRecipeScreen({ navigation, route }) {
     if (shared.url) {
       setTab("link");
       setUrl(shared.url);
-      runImport(() => importFromUrl(shared.url, names));
-    } else if (shared.text.length >= 20) {
+      setPasted(shared.text || "");
+      runImport(() => importFromUrl(shared.url, names, shared.text), shared.url);
+    } else if ((shared.text || "").length >= 20) {
       setTab("link");
       setPasted(shared.text);
       runImport(() => importFromText(shared.text, names));
@@ -103,7 +113,8 @@ function AddRecipeScreen({ navigation, route }) {
     (tab === "photo" && !!photo) ||
     (tab === "manual" && manual.title.trim().length > 0);
 
-  const runImport = async (work) => {
+  // `fromUrl` is the link being imported, used to word errors for Instagram and TikTok.
+  const runImport = async (work, fromUrl = null) => {
     setPhase("importing");
     setStage(0);
     clearInterval(stageTimer.current);
@@ -120,7 +131,10 @@ function AddRecipeScreen({ navigation, route }) {
       setPhase("review");
     } catch (e) {
       clearInterval(stageTimer.current);
-      setErrorCode(e.code || "failed");
+      const code = e.code || "failed";
+      // A social post we could read but that holds no recipe usually has it in the
+      // video or the comments: the fix is the same as for an unreadable post.
+      setErrorCode(isSocialUrl(fromUrl) && code === "no-recipe" ? "social-no-recipe" : code);
       setPhase("error");
     }
   };
@@ -130,7 +144,10 @@ function AddRecipeScreen({ navigation, route }) {
     if (tab === "link") {
       const names = categories.map((c) => c.name);
       runImport(() =>
-        url.trim() ? importFromUrl(url.trim(), names) : importFromText(pasted, names)
+        url.trim()
+          ? importFromUrl(url.trim(), names, pasted)
+          : importFromText(pasted, names),
+        url.trim() || null
       );
     } else if (tab === "photo") {
       runImport(() => importFromImage(photo, categories.map((c) => c.name)));
@@ -257,7 +274,7 @@ function AddRecipeScreen({ navigation, route }) {
                   style={styles.pasteBox}
                   value={pasted}
                   onChangeText={setPasted}
-                  placeholder="או הדביקו כאן את טקסט המתכון (למשל הכיתוב של סרטון)"
+                  placeholder="טקסט המתכון או הכיתוב של הסרטון (אפשר גם יחד עם הקישור)"
                   placeholderTextColor={C.faint}
                   multiline
                 />
@@ -267,8 +284,8 @@ function AddRecipeScreen({ navigation, route }) {
                     <Text style={styles.videoTitle}>מתכונים מסרטונים</Text>
                   </View>
                   <Text style={styles.videoText}>
-                    אפשר להדביק את הקישור לסרטון, ואם המתכון כתוב בכיתוב של הסרטון (באינסטגרם או
-                    בטיקטוק) להעתיק אותו ולהדביק בשדה שלמעלה.
+                    הכי פשוט: לשתף את הסרטון מאינסטגרם או מטיקטוק ישירות ל-FoodFolio. אם הייבוא לא
+                    מצליח, מעתיקים את הכיתוב של הסרטון ומדביקים אותו בשדה שלמעלה, ליד הקישור.
                   </Text>
                 </View>
               </>

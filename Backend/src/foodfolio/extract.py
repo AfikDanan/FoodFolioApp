@@ -113,10 +113,46 @@ def visible_text(html: str, limit: int) -> str:
     return "\n".join(line for line in lines if line)[:limit]
 
 
+_META_KEYS = ("og:title", "og:description", "twitter:description", "description")
+
+
+class _MetaCollector(HTMLParser):
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.found: dict[str, str] = {}
+
+    def handle_starttag(self, tag, attrs):
+        if tag != "meta":
+            return
+        attrs = dict(attrs)
+        key = (attrs.get("property") or attrs.get("name") or "").lower()
+        content = (attrs.get("content") or "").strip()
+        if key in _META_KEYS and content and key not in self.found:
+            self.found[key] = content
+
+
+def meta_text(html: str) -> str:
+    """The page's preview title and description (og:/twitter:/description tags).
+
+    Social sites that hide the page behind a login (Instagram) still put the post's
+    caption here so link previews work, and the visible text skips the <head>.
+    """
+    collector = _MetaCollector()
+    collector.feed(html)
+    seen: list[str] = []
+    for key in _META_KEYS:
+        value = collector.found.get(key)
+        if value and not any(value in other or other in value for other in seen):
+            seen.append(value)
+    return "\n".join(seen)
+
+
 def page_to_model_input(html: str, limit: int) -> str:
     """Text to send to the model for a fetched page."""
     recipe = find_jsonld_recipe(html)
     if recipe and recipe.get("recipeIngredient") and recipe.get("recipeInstructions"):
         slim = {key: recipe[key] for key in _RECIPE_KEYS if key in recipe}
         return json.dumps(slim, ensure_ascii=False)[:limit]
-    return visible_text(html, limit)
+    meta = meta_text(html)
+    body = visible_text(html, limit)
+    return (f"{meta}\n\n{body}" if meta else body)[:limit]

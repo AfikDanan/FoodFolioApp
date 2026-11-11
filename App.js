@@ -18,6 +18,7 @@ import {
   Heebo_900Black,
 } from "@expo-google-fonts/heebo";
 import { initDB } from "./util/database";
+import { splitShared } from "./util/share";
 import { loadShoppingList } from "./util/shopping";
 import { loadMeals } from "./util/mealSettings";
 import { I18nManager } from "react-native";
@@ -54,13 +55,11 @@ function ShareHandler({ ready }) {
   const { hasShareIntent, shareIntent, resetShareIntent } = useShareIntentContext();
   useEffect(() => {
     if (!ready || !hasShareIntent) return;
-    const link = shareIntent?.webUrl || (shareIntent?.text || "").match(/https?:\/\/\S+/)?.[0];
-    const text = shareIntent?.text?.trim();
-    if (link || text) {
-      navigationRef.navigate("AddRecipe", {
-        shared: link ? { url: link } : { text },
-        at: Date.now(),
-      });
+    // Keep the text that came with a link: for Instagram and TikTok it is often
+    // the caption, which is where the recipe is written.
+    const { url, text } = splitShared(shareIntent || {});
+    if (url || text) {
+      navigationRef.navigate("AddRecipe", { shared: { url, text }, at: Date.now() });
     }
     resetShareIntent();
   }, [ready, hasShareIntent, shareIntent, resetShareIntent]);

@@ -63,13 +63,16 @@ async function fetchPageOnDevice(url) {
   }
 }
 
-export async function importFromUrl(url, categories = []) {
+// `text` is optional: a caption shared or pasted along with the link.
+export async function importFromUrl(url, categories = [], text = "") {
+  const caption = String(text || "").trim().slice(0, 30000);
+  const extra = caption ? { text: caption } : {};
   try {
-    return await postImport({ type: "url", url: String(url), categories });
+    return await postImport({ type: "url", url: String(url), categories, ...extra });
   } catch (e) {
     if (e.code !== "fetch-blocked") throw e;
     const html = await fetchPageOnDevice(String(url));
-    return postImport({ type: "html", url: String(url), html, categories });
+    return postImport({ type: "html", url: String(url), html, categories, ...extra });
   }
 }
 

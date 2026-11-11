@@ -1,6 +1,8 @@
 """AWS Lambda entry point for the HTTP API (payload format 2.0).
 
-POST /import      {"type": "url", "url": "..."} | {"type": "image", "image": "<base64>"}
+POST /import      {"type": "url", "url": "...", "text"?: "<shared caption>"}
+                  | {"type": "html", "url", "html", "text"?} | {"type": "text", "text"}
+                  | {"type": "image", "image": "<base64>"}
                   optional "categories": [str]  (the user's category names)
               ->  200 {"recipe": {...}}
 POST /substitute  {"ingredient", "quantity", "unit", "recipe_title", "other_ingredients"}
