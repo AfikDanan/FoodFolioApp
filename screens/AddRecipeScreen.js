@@ -32,6 +32,8 @@ import {
 import { RoundButton, Segmented, Chip, DepartmentIcon, useToast } from "../components/UI/kit";
 import { C, F, SCREEN_PAD } from "../constants/theme";
 
+const SOCIAL_ERRORS = ["needs-caption", "social-no-recipe"];
+
 const STAGES = [
   "קורא את התוכן",
   "מחלץ מרכיבים והוראות",
@@ -50,7 +52,7 @@ const ERRORS = {
   },
   "needs-caption": {
     title: "לא הצלחנו לקרוא את הפוסט",
-    sub: "פתחו את הפוסט באינסטגרם או בטיקטוק, העתיקו את הטקסט שמתחת לסרטון והדביקו אותו כאן. פוסט מחשבון פרטי אי אפשר לקרוא.",
+    sub: "כנראה שזה פוסט מחשבון פרטי: גם אם אתם עוקבים אחריו, FoodFolio לא רואה אותו. העתיקו את הכיתוב באינסטגרם או בטיקטוק וחזרו לכאן, או צלמו מסך של המתכון.",
   },
   "social-no-recipe": {
     title: "לא מצאנו מתכון בטקסט של הפוסט",
@@ -213,6 +215,23 @@ function AddRecipeScreen({ navigation, route }) {
       setSaving(false);
       toast("השמירה נכשלה, נסו שוב");
     }
+  };
+
+  // Private or unreadable post: the person copies the caption in Instagram or
+  // TikTok, comes back and imports it with one tap (the link is kept as context).
+  const pasteCaptionAndRetry = async () => {
+    const clip = ((await Clipboard.getStringAsync()) || "").trim();
+    if (clip.length < 20 || /^https?:\/\/\S+$/.test(clip)) {
+      toast("קודם מעתיקים את הכיתוב של הפוסט, ואז חוזרים לכאן");
+      return;
+    }
+    setPasted(clip);
+    const names = categories.map((c) => c.name);
+    const link = url.trim();
+    runImport(
+      () => (link ? importFromUrl(link, names, clip) : importFromText(clip, names)),
+      link || null
+    );
   };
 
   const resetToForm = (nextTab) => {
@@ -385,9 +404,20 @@ function AddRecipeScreen({ navigation, route }) {
           <Ionicons name="alert-circle-outline" size={44} color={C.warnText} />
           <Text style={styles.errorTitle}>{ERRORS[errorCode]?.title || ERRORS.failed.title}</Text>
           <Text style={styles.errorSub}>{ERRORS[errorCode]?.sub || ERRORS.failed.sub}</Text>
-          <TouchableOpacity style={styles.primarySmall} onPress={() => resetToForm()}>
-            <Text style={styles.primarySmallText}>נסו שוב</Text>
-          </TouchableOpacity>
+          {SOCIAL_ERRORS.includes(errorCode) ? (
+            <>
+              <TouchableOpacity style={styles.primarySmall} onPress={pasteCaptionAndRetry}>
+                <Text style={styles.primarySmallText}>הדבקת הכיתוב שהעתקתי</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.secondary} onPress={() => resetToForm("photo")}>
+                <Text style={styles.secondaryText}>ייבוא מצילום מסך</Text>
+              </TouchableOpacity>
+            </>
+          ) : (
+            <TouchableOpacity style={styles.primarySmall} onPress={() => resetToForm()}>
+              <Text style={styles.primarySmallText}>נסו שוב</Text>
+            </TouchableOpacity>
+          )}
           <TouchableOpacity style={styles.secondary} onPress={() => resetToForm("manual")}>
             <Text style={styles.secondaryText}>הזנה ידנית</Text>
           </TouchableOpacity>
