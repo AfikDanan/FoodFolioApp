@@ -397,7 +397,9 @@ function CookTogetherScreen({ navigation, route }) {
       if (!alive) return;
       setTracks(built);
       const saved = await loadCookRun();
-      if (alive && saved && saved.signature === signature && saved.run?.length === built.length) {
+      // A session left more than 12 hours ago is stale, not something to resume.
+      const fresh = saved && Date.now() - (saved.at || 0) < 12 * 3600 * 1000;
+      if (alive && fresh && saved.signature === signature && saved.run?.length === built.length) {
         setRun(saved.run);
         setPhase("run");
       }
@@ -412,7 +414,7 @@ function CookTogetherScreen({ navigation, route }) {
   // Remember the place in the session.
   const persist = useCallback(
     (next) => {
-      saveCookRun(next && !allDone(next) ? { signature, run: next } : null).catch(() => {});
+      saveCookRun(next && !allDone(next) ? { signature, run: next, at: Date.now() } : null).catch(() => {});
     },
     [signature]
   );
