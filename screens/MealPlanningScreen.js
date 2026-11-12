@@ -12,7 +12,7 @@ import BatchCooking from "../components/BatchCooking";
 import { addToShoppingList, recipeToShoppingItems } from "../util/shopping";
 import { generateFill, slotKey } from "../util/planner";
 import { useMeals } from "../util/mealSettings";
-import { loadPlan, savePlan, loadCookDay, saveCookDay } from "../util/planStore";
+import { loadPlan, savePlan, loadCookSession, saveCookSession } from "../util/planStore";
 import { dateKey, dayName, normalizeRecipe, nextDays, shortDate } from "../util/recipeUtils";
 import { C, F, SCREEN_PAD } from "../constants/theme";
 
@@ -33,7 +33,7 @@ function MealPlanningScreen({ navigation, route }) {
   const [recipes, setRecipes] = useState([]);
   const [plan, setPlan] = useState({}); // { "YYYY-MM-DD|meal": recipeId }
   const [prep, setPrep] = useState({}); // { key: "fridge" | "freeze" }
-  const [cookDay, setCookDay] = useState("");
+  const [session, setSession] = useState(null); // the saved cooking day
   const [review, setReview] = useState(null); // { before, beforePrep, suggested, seed }
   const [picker, setPicker] = useState(null);
   const [fillOpen, setFillOpen] = useState(false);
@@ -43,12 +43,12 @@ function MealPlanningScreen({ navigation, route }) {
     const [rows, stored, cook] = await Promise.all([
       fetchAllRecipesWithCategories(),
       loadPlan(),
-      loadCookDay(),
+      loadCookSession(),
     ]);
     setRecipes((rows || []).map(normalizeRecipe));
     setPlan(stored.plan);
     setPrep(stored.prep);
-    setCookDay(cook || "");
+    setSession(cook);
   }, []);
 
   useFocusEffect(
@@ -65,6 +65,12 @@ function MealPlanningScreen({ navigation, route }) {
       setFillOpen(true);
     }
   }, [fillToken]);
+
+  // Home's cooking-day card opens the cooking day here.
+  const cookToken = route.params?.openCookDay;
+  useEffect(() => {
+    if (cookToken) setMode("prep");
+  }, [cookToken]);
 
   const byId = (id) => recipes.find((r) => r.id === id);
   const inWeek = (key) => days.some((d) => key.startsWith(dateKey(d)));
@@ -122,19 +128,30 @@ function MealPlanningScreen({ navigation, route }) {
     navigation.navigate("Shopping List");
   };
 
-  const applyBatch = ({ plan: batchPlan, prep: batchPrep, cookKey }) => {
-    commit({ ...plan, ...batchPlan }, { ...prep, ...batchPrep });
+  // Saves the cooking day. Meals an earlier version of it filled are cleared first.
+  const applyBatch = async ({ plan: batchPlan, prep: batchPrep, session: next }) => {
+    const basePlan = { ...plan };
+    const basePrep = { ...prep };
+    for (const key of session?.slots || []) {
+      delete basePlan[key];
+      delete basePrep[key];
+    }
+    commit({ ...basePlan, ...batchPlan }, { ...basePrep, ...batchPrep });
     setReview(null); // the batch replaces any pending suggestions
-    setCookDay(cookKey);
-    saveCookDay(cookKey);
+    setSession(await saveCookSession(next));
     setMode("daily");
-    toast(`${Object.keys(batchPlan).length} ארוחות שובצו בלוח השבוע`);
+    toast(`יום הבישול נשמר, ${Object.keys(batchPlan).length} ארוחות שובצו בלוח`);
   };
 
+  const cookNow = (params) => navigation.navigate("CookTogether", params);
+
+  // Stay on the cooking day so the plan is not lost; the list is one tap away.
   const batchShopping = async (items, count) => {
     await addToShoppingList(items);
-    toast(`נוספו מרכיבים ל־${count} מתכונים, מוכפלים לכמות השבועית`);
-    navigation.navigate("Shopping List");
+    toast(`נוספו מרכיבים ל־${count} מתכונים, מוכפלים לכמות הנדרשת`, {
+      label: "לקניות",
+      onPress: () => navigation.navigate("Shopping List"),
+    });
   };
 
   const reviewCount = review ? Object.keys(review.suggested).length : 0;
@@ -161,7 +178,7 @@ function MealPlanningScreen({ navigation, route }) {
             onChange={setMode}
             options={[
               { key: "daily", label: "לפי ימים", icon: "calendar-outline" },
-              { key: "prep", label: "בישול מרוכז", icon: "flame-outline" },
+              { key: "prep", label: "יום בישול", icon: "flame-outline" },
             ]}
           />
         )}
@@ -170,8 +187,9 @@ function MealPlanningScreen({ navigation, route }) {
       {mode === "prep" && canBatch ? (
         <BatchCooking
           recipes={recipes}
-          days={days}
-          onApply={applyBatch}
+          session={session}
+          onSave={applyBatch}
+          onCookNow={cookNow}
           onShopping={batchShopping}
           toast={toast}
           meals={meals}
@@ -212,7 +230,7 @@ function MealPlanningScreen({ navigation, route }) {
                       <Text style={styles.todayBadgeText}>היום</Text>
                     </View>
                   )}
-                  {cookDay === dateKey(date) && (
+                  {session?.date === dateKey(date) && (
                     <View style={styles.cookBadge}>
                       <Ionicons name="flame" size={12} color={C.white} />
                       <Text style={styles.cookBadgeText}>יום בישול</Text>

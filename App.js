@@ -26,6 +26,7 @@ import { I18nManager } from "react-native";
 import EditRecipeScreen from "./screens/EditRecipeScreen";
 import RecipeDetailScreen from "./screens/RecipeDetailScreen";
 import CookingModeScreen from "./screens/CookingModeScreen";
+import CookTogetherScreen from "./screens/CookTogetherScreen";
 import AddRecipeScreen from "./screens/AddRecipeScreen";
 import AddCategoryScreen from "./screens/AddCategory/AddCategoryScreen";
 import SettingsScreen from "./screens/SettingsScreen";
@@ -169,6 +170,14 @@ export default function App() {
             <Stack.Screen
               name="CookingMode"
               component={CookingModeScreen}
+              options={{
+                headerShown: false,
+                cardStyle: { backgroundColor: C.cookBg },
+              }}
+            />
+            <Stack.Screen
+              name="CookTogether"
+              component={CookTogetherScreen}
               options={{
                 headerShown: false,
                 cardStyle: { backgroundColor: C.cookBg },

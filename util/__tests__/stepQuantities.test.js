@@ -86,6 +86,11 @@ describe("annotateStep", () => {
     expect(flat(annotateStep("מפוררים פטה מעל ומגישים.", list))).toBe("מפוררים פטה[100 גרם] מעל ומגישים.");
   });
 
+  it("does not mistake a verb for an ingredient", () => {
+    expect(flat(annotateStep("מחממים תנור ומשמנים תבנית.", ings))).toBe("מחממים תנור ומשמנים תבנית.");
+    expect(flat(annotateStep("מוסיפים מהבצל המטוגן.", ings))).toBe("מוסיפים מהבצל המטוגן[1 יחידה].");
+  });
+
   it("returns the text untouched when nothing matches", () => {
     expect(annotateStep("מחממים תנור.", ings)).toEqual(["מחממים תנור."]);
     expect(annotateStep("", ings)).toEqual([""]);

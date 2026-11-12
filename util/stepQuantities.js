@@ -4,8 +4,9 @@
 import { displayUnit, formatQty, parseQty } from "./recipeUtils";
 
 const HEB = "א-ת";
-// One-letter prefixes that attach to a Hebrew noun: ו, ה, ב, ל, מ, ש, כ.
-const PREFIX = "[והבלמשכ]{0,2}";
+// Prefixes that attach to a Hebrew noun: ו ש ב ל כ, then ה or מה ("מהבצל"). A bare
+// מ is left out on purpose: "ומשמנים" (greasing) must not read as the oil.
+const PREFIX = "[ושבלכ]{0,2}(?:מה|ה)?";
 const ENDING = "(?:יים|יות|ייה|ים|ות|יה|י|ה|ת)?";
 const FINALS = { ך: "כ", ם: "מ", ן: "נ", ף: "פ", ץ: "צ" };
 const TO_FINAL = { כ: "ך", מ: "ם", נ: "ן", פ: "ף", צ: "ץ" };
