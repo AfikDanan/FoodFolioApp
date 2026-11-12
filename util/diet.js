@@ -223,7 +223,8 @@ function reasonFor(name, diet, meaty) {
   } else if (diet.style === "pescatarian") {
     if (flesh) return "לא צמחוני";
   }
-  if (diet.noMeatDairy && meaty && g.dairy) return "חלבי במתכון בשרי";
+  // Kosher keeps meat and dairy apart, so it implies the separate toggle.
+  if ((diet.noMeatDairy || diet.kosher) && meaty && g.dairy) return "חלבי במתכון בשרי";
   for (const word of diet.avoid) {
     if (containsWord(text, word)) return "לא אוכלים אצלנו";
   }

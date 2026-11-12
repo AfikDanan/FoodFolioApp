@@ -37,8 +37,10 @@ describe("reading a step", () => {
     expect(stepMinutes("צולים כשעה")).toBe(60);
     expect(stepMinutes("אופים שעה וחצי")).toBe(90);
     expect(stepMinutes("מתפיחים שעתיים")).toBe(120);
-    expect(stepMinutes("מבשלים 10-12 דקות")).toBe(10);
+    expect(stepMinutes("מבשלים 10-12 דקות")).toBe(12);
     expect(stepMinutes("מטגנים 5 דקות, ואז מבשלים 30 דקות")).toBe(30);
+    expect(stepMinutes("מבשלים 20 דק עד ריכוך")).toBe(20);
+    expect(stepMinutes("מבשלים 15-20 דקות")).toBe(20);
     expect(stepMinutes("מחממים תנור ל־200 מעלות")).toBeNull();
     expect(stepMinutes("חותכים בצל")).toBeNull();
   });
@@ -49,6 +51,12 @@ describe("reading a step", () => {
     expect(classifyStep("מטגנים את הבצל 5 דקות")).toMatchObject({ kind: "active", minutes: 5 });
     expect(classifyStep("מבשלים 15 דקות תוך כדי ערבוב")).toMatchObject({ kind: "active", minutes: 15 });
     expect(classifyStep("חותכים ירקות").kind).toBe("active");
+    expect(classifyStep("מבשלים 20 דק עד ריכוך")).toMatchObject({ kind: "passive", minutes: 20 });
+    // Waiting overnight is not part of today's cooking.
+    expect(classifyStep("משרים את החומוס במים למשך הלילה")).toMatchObject({ kind: "active", minutes: 3 });
+    // No time given: the oven still works by itself, warming it up does not.
+    expect(classifyStep("מעבירים לתנור ב־180 מעלות")).toMatchObject({ kind: "passive" });
+    expect(classifyStep("מחממים תנור ל־180 מעלות").kind).toBe("active");
   });
 });
 

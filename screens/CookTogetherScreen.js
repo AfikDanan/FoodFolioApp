@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { View, Text, ScrollView, TouchableOpacity, StyleSheet } from "react-native";
+import { View, Text, ScrollView, TouchableOpacity, StyleSheet, Vibration } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useKeepAwake } from "expo-keep-awake";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -439,6 +439,11 @@ function CookTogetherScreen({ navigation, route }) {
       const { run: next, finished } = tickRun(tracks, cur, t);
       if (finished.length) {
         update(next, { record: false });
+        try {
+          Vibration.vibrate([0, 500, 250, 500, 250, 500]);
+        } catch (e) {
+          // no vibration on this device
+        }
         toast(`⏰ ${tracks[finished[0]].short}: הטיימר הסתיים`);
       }
     }, 1000);
@@ -446,6 +451,20 @@ function CookTogetherScreen({ navigation, route }) {
   }, [phase, tracks, update, toast]);
 
   if (!tracks || !plan) return <View style={styles.root} />;
+
+  if (tracks.length === 0) {
+    return (
+      <View style={[styles.root, { paddingTop: insets.top + 12, justifyContent: "center", alignItems: "center", gap: 14 }]}>
+        <Text style={styles.finishTitle}>אין שלבי הכנה</Text>
+        <Text style={[styles.sub, { textAlign: "center" }]}>
+          למתכונים שנבחרו אין שלבי הכנה, ולכן אין מה להפעיל. אפשר להוסיף שלבים בעריכת המתכון.
+        </Text>
+        <TouchableOpacity style={[styles.cta, { alignSelf: "stretch" }]} onPress={() => navigation.goBack()}>
+          <Text style={styles.ctaText}>חזרה</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
 
   const view_ = view || prefs.cookView;
   const start = () => {
@@ -490,9 +509,13 @@ function CookTogetherScreen({ navigation, route }) {
       <View style={styles.header}>
         <Text style={styles.time}>
           {phase === "run" && !finished ? (
-            <Text>
-              נותרו כ־<Text style={{ writingDirection: "ltr" }}>{hmm(left)}</Text> שעות
-            </Text>
+            left < 60 ? (
+              `נותרו כ־${Math.max(1, Math.round(left))} דקות`
+            ) : (
+              <Text>
+                נותרו כ־<Text style={{ writingDirection: "ltr" }}>{hmm(left)}</Text> שעות
+              </Text>
+            )
           ) : (
             `סך הכל ${timeLabel(Math.round(plan.total))}`
           )}

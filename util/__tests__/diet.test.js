@@ -87,6 +87,8 @@ describe("dietConflicts", () => {
       1: "לא כשר",
     });
     expect(dietConflicts(pasta, diet({ noMeatDairy: true }))).toEqual({ 2: "חלבי במתכון בשרי" });
+    // Kosher keeps meat and dairy apart on its own.
+    expect(dietConflicts(pasta, diet({ kosher: true }))).toEqual({ 2: "חלבי במתכון בשרי" });
     // Dairy alone is fine.
     expect(dietConflicts(["פסטה", "שמנת מתוקה"], diet({ noMeatDairy: true }))).toEqual({});
   });

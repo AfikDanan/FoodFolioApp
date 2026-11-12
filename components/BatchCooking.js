@@ -84,7 +84,11 @@ function BatchCooking({ recipes, meals: dayMeals, session, onSave, onShopping, o
   };
 
   const [step, setStep] = useState(0);
-  const [cookDate, setCookDate] = useState(() => (session ? parse(session.date) : today));
+  // A saved cooking day that has passed opens on today instead of a disabled date.
+  const [cookDate, setCookDate] = useState(() => {
+    const saved = session ? parse(session.date) : today;
+    return saved < today ? today : saved;
+  });
   const [count, setCount] = useState(session?.days || 5);
   const [people, setPeople] = useState(session?.people || 2);
   const [meals, setMeals] = useState(() =>

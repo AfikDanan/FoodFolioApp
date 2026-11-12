@@ -71,9 +71,10 @@ function HomeScreen({ navigation }) {
   // The saved cooking day: its dishes, and how long it takes in the kitchen.
   const cook = useMemo(() => {
     if (!session || session.date < todayKey) return null;
+    // Recipes without steps cannot be cooked together, so they are not counted.
     const dishes = Object.entries(session.picks)
       .map(([id, k]) => ({ r: recipes.find((x) => x.id === Number(id)), k }))
-      .filter((x) => x.r);
+      .filter((x) => x.r && x.r.steps.length > 0);
     if (!dishes.length) return null;
     const tracks = buildTracks(
       dishes.map((x) => ({ r: x.r, factor: (x.k * session.people) / x.r.servings }))

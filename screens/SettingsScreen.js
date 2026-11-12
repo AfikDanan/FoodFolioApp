@@ -236,7 +236,7 @@ const SettingsScreen = () => {
           >
             <View style={{ flex: 1, gap: 1 }}>
               <Text style={styles.rowLabel}>כשר</Text>
-              <Text style={styles.rowSub}>בלי חזיר ובלי פירות ים</Text>
+              <Text style={styles.rowSub}>בלי חזיר ופירות ים, ובלי בשר וחלב יחד</Text>
             </View>
             <Toggle on={diet.kosher} onPress={() => saveDiet({ kosher: !diet.kosher })} />
           </TouchableOpacity>

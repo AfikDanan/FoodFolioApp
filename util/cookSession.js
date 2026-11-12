@@ -30,10 +30,14 @@ export function stepMinutes(text) {
   if (/שעה וחצי|שעתיים וחצי/.test(s)) total += 30;
   if (/שעה ורבע/.test(s)) total += 15;
   // All "N דקות" mentions: the longest one is the step's main wait.
-  const re = new RegExp(`${NUM}(?:\\s*[-–]\\s*\\d+)?\\s*(?:דקות|דק׳|דק'|דק\\b)`, "g");
+  // "15-20 דקות" counts as the upper bound. (\\b does not work next to Hebrew letters.)
+  const re = new RegExp(`${NUM}(?:\\s*[-–]\\s*${NUM})?\\s*(?:דקות|דק׳|דק'|דק(?![\\u05D0-\\u05EA]))`, "g");
   let m;
   let minutes = 0;
-  while ((m = re.exec(s))) minutes = Math.max(minutes, Math.round(parseFloat(m[1].replace(",", "."))));
+  while ((m = re.exec(s))) {
+    const hi = m[2] ? parseFloat(m[2].replace(",", ".")) : 0;
+    minutes = Math.max(minutes, Math.round(Math.max(hi, parseFloat(m[1].replace(",", ".")))));
+  }
   if (!minutes && /כמה דקות|מספר דקות/.test(s)) minutes = 3;
   if (!minutes && /דקה[- ]שתיים|כדקה|דקה אחת/.test(s)) minutes = 1;
   total += minutes;
@@ -41,7 +45,7 @@ export function stepMinutes(text) {
 }
 
 const PASSIVE_WORDS =
-  /אופים|לאפות|צולים|לצלות|מבשלים|לבשל|מכסים|מצננים|מקררים|לקרר|מתפיחים|להתפיח|התפחה|משרים|להשרות|לנוח|מרתיחים|מצמצמים|בתנור|על אש (?:נמוכה|קטנה|בינונית)|מבעבע|מאדים|במקרר|במקפיא|מקפיאים|ממתינים|מחכים|משהים|מניחים בצד|להצטנן|להתייצב|לספוג/;
+  /אופים|לאפות|צולים|לצלות|מבשלים|לבשל|מכסים|מצננים|מקררים|לקרר|מתפיחים|להתפיח|התפחה|משרים|להשרות|לנוח|מרתיחים|מצמצמים|בתנור|לתנור|על אש (?:נמוכה|קטנה|בינונית)|מבעבע|מאדים|במקרר|במקפיא|מקפיאים|ממתינים|מחכים|משהים|מניחים בצד|להצטנן|להתייצב|לספוג/;
 const HANDS_ON_WORDS =
   /תוך (?:כדי )?ערבוב|מערבבים כל הזמן|בלי להפסיק|ללא הפסקה|מטגנים|מקפיצים|משחימים|צורבים|טורפים|מקציפים|לשים|קולים|מזהיבים|מאדים בצל/;
 
@@ -53,6 +57,11 @@ const HANDS_ON_WORDS =
  */
 export function classifyStep(text) {
   const s = String(text || "");
+  // Overnight waits (soaking, chilling) happen outside today's cooking: only the
+  // few minutes of setting them up count.
+  if (/לילה/.test(s) && /משרים|להשרות|מקררים|במקרר|מתפיחים|מרינד|מעמידים|משהים/.test(s)) {
+    return { kind: "active", minutes: 3, stated: true };
+  }
   const minutes = stepMinutes(s);
   if (minutes !== null) {
     const stirring = /תוך (?:כדי )?ערבוב|מערבבים כל הזמן|בלי להפסיק|ללא הפסקה/.test(s);
@@ -61,6 +70,11 @@ export function classifyStep(text) {
       (minutes >= 10 || (minutes >= 5 && PASSIVE_WORDS.test(s) && !HANDS_ON_WORDS.test(s)));
     if (passive) return { kind: "passive", minutes: Math.min(minutes, MAX_PASSIVE), stated: true };
     return { kind: "active", minutes: Math.max(1, minutes), stated: true };
+  }
+  // No time given: an oven, a pot or a rise still cooks by itself. Warming the
+  // oven up is quick hands-on work.
+  if (PASSIVE_WORDS.test(s) && !HANDS_ON_WORDS.test(s) && !/מחממים|מחמם|חימום|מניחים בצד/.test(s)) {
+    return { kind: "passive", minutes: 20, stated: true };
   }
   return { kind: "active", minutes: Math.min(6, Math.max(2, Math.round(s.length / 30) + 1)), stated: false };
 }
