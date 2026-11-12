@@ -75,6 +75,22 @@ export const batchCandidates = (recipes) =>
     .filter((r) => r.cat.some((c) => BATCH_CATS.includes(c)))
     .sort((a, b) => Number(a.fridge < 3) - Number(b.fridge < 3));
 
+// Every recipe can be cooked ahead; the ones that keep well come first, and
+// those best eaten fresh sink to the bottom (in their original order).
+export const cookDayCandidates = (recipes) =>
+  recipes
+    .map((r, i) => ({ r, i }))
+    .sort((a, b) => Number(a.r.fridge < 3) - Number(b.r.fridge < 3) || b.r.fridge - a.r.fridge || a.i - b.i)
+    .map((x) => x.r);
+
+// `count` days starting at the cook day: the days its food has to cover.
+export function coverFrom(date, count) {
+  return Array.from(
+    { length: count },
+    (_, i) => new Date(date.getFullYear(), date.getMonth(), date.getDate() + i)
+  );
+}
+
 // Days (from the cook day, max 5, clipped to the week) the batch has to cover.
 export function coverDays(days, cookIndex) {
   return days.slice(cookIndex, Math.min(cookIndex + 5, days.length));
@@ -111,9 +127,11 @@ export function distribute({ picks, cover, meals }) {
 export function autoCompletePicks({ recipes, picks, need }) {
   const next = { ...picks };
   let left = need - Object.values(next).reduce((a, b) => a + b, 0);
-  const pool = batchCandidates(recipes)
-    .filter((r) => r.fridge >= 3 && !next[r.id])
-    .sort((a, b) => b.fridge - a.fridge);
+  const keeps = (list) =>
+    list.filter((r) => r.fridge >= 3 && !next[r.id]).sort((a, b) => b.fridge - a.fridge);
+  // Mains, sides and salads first; any other dish that keeps only if there are none.
+  let pool = keeps(batchCandidates(recipes));
+  if (!pool.length) pool = keeps(recipes);
   for (const r of pool) {
     if (left <= 0) break;
     const k = Math.min(2, left);

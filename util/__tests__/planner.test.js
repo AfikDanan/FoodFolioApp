@@ -1,7 +1,9 @@
 import {
   autoCompletePicks,
   buildTimeline,
+  cookDayCandidates,
   coverDays,
+  coverFrom,
   distribute,
   generateFill,
   slotKey,
@@ -94,6 +96,24 @@ describe("batch cooking", () => {
   it("auto-complete adds dishes that keep at least 3 days, two meals each", () => {
     const picks = autoCompletePicks({ recipes: [a, b, r(3, { fridge: 4 })], picks: {}, need: 4 });
     expect(picks).toEqual({ 2: 2, 3: 2 });
+  });
+
+  it("offers every recipe for the cooking day, the ones that keep well first", () => {
+    const cake = r(7, { cat: ["קינוחים"], fridge: 5 });
+    const fresh = r(8, { cat: ["סלטים"], fridge: 1 });
+    const stew = r(9, { fridge: 4 });
+    expect(cookDayCandidates([fresh, stew, cake]).map((x) => x.id)).toEqual([7, 9, 8]);
+  });
+
+  it("covers any number of days from any date, across months", () => {
+    const cover = coverFrom(new Date(2026, 10, 28), 5);
+    expect(cover.map((d) => d.getDate())).toEqual([28, 29, 30, 1, 2]);
+    expect(cover[4].getMonth()).toBe(11);
+  });
+
+  it("auto-complete falls back to other dishes when there are no mains", () => {
+    const picks = autoCompletePicks({ recipes: [r(5, { cat: ["קינוחים"], fridge: 4 })], picks: {}, need: 2 });
+    expect(picks).toEqual({ 5: 2 });
   });
 
   it("starts the timeline with the longest dish and ends with boxing up", () => {

@@ -26,6 +26,8 @@ export default function StepText({ text, ingredients, style, large, dark, show, 
             key={i}
             style={[
               styles.pill,
+              // No gap before a comma or a full stop that follows the pill.
+              /^[,.;:!?)]/.test(typeof parts[i + 1] === "string" ? parts[i + 1] : "") && { marginEnd: 0 },
               large ? styles.pillLarge : styles.pillSmall,
               { backgroundColor: dark ? "rgba(255,255,255,0.14)" : C.chip },
             ]}
