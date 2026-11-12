@@ -173,23 +173,28 @@ export function Sheet({ visible, onClose, children, radius = 28 }) {
 const ToastContext = createContext(() => {});
 export const useToast = () => useContext(ToastContext);
 
+// toast(text) shows a short note. toast(text, { label, onPress }) adds one button
+// (for example "ביטול" to undo) and stays up longer so there is time to tap it.
 export function ToastProvider({ children }) {
   const [message, setMessage] = useState(null);
   const opacity = useRef(new Animated.Value(0)).current;
   const timer = useRef(null);
 
+  const hide = useCallback(() => {
+    clearTimeout(timer.current);
+    Animated.timing(opacity, { toValue: 0, duration: 200, useNativeDriver: true }).start(
+      () => setMessage(null)
+    );
+  }, [opacity]);
+
   const show = useCallback(
-    (text) => {
-      setMessage(text);
+    (text, action) => {
+      setMessage({ text, action: action || null });
       clearTimeout(timer.current);
       Animated.timing(opacity, { toValue: 1, duration: 200, useNativeDriver: true }).start();
-      timer.current = setTimeout(() => {
-        Animated.timing(opacity, { toValue: 0, duration: 200, useNativeDriver: true }).start(
-          () => setMessage(null)
-        );
-      }, 2600);
+      timer.current = setTimeout(hide, action ? 7000 : 2600);
     },
-    [opacity]
+    [opacity, hide]
   );
 
   useEffect(() => () => clearTimeout(timer.current), []);
@@ -198,9 +203,26 @@ export function ToastProvider({ children }) {
     <ToastContext.Provider value={show}>
       {children}
       {message !== null && (
-        <Animated.View pointerEvents="none" style={[kit.toastWrap, { opacity }]}>
-          <View style={kit.toast}>
-            <Text style={kit.toastText}>{message}</Text>
+        <Animated.View
+          pointerEvents={message.action ? "box-none" : "none"}
+          style={[kit.toastWrap, { opacity }]}
+        >
+          <View style={[kit.toast, message.action && kit.toastWithAction]}>
+            <Text style={[kit.toastText, message.action && { textAlign: "auto", flexShrink: 1 }]}>
+              {message.text}
+            </Text>
+            {message.action && (
+              <TouchableOpacity
+                style={kit.toastAction}
+                activeOpacity={0.7}
+                onPress={() => {
+                  hide();
+                  message.action.onPress();
+                }}
+              >
+                <Text style={kit.toastActionText}>{message.action.label}</Text>
+              </TouchableOpacity>
+            )}
           </View>
         </Animated.View>
       )}
@@ -401,6 +423,22 @@ export const kit = StyleSheet.create({
     shadowRadius: 12,
     elevation: 8,
   },
+  toastWithAction: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 14,
+    paddingVertical: 6,
+    paddingEnd: 6,
+  },
+  toastAction: {
+    height: 44,
+    paddingHorizontal: 16,
+    borderRadius: 10,
+    backgroundColor: "rgba(255,255,255,0.14)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  toastActionText: { color: C.white, fontFamily: F.bold, fontSize: 14 },
   toastText: {
     color: C.white,
     fontFamily: F.medium,

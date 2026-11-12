@@ -15,6 +15,7 @@ import { useFocusEffect } from "@react-navigation/native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import {
   RoundButton,
+  Sheet,
   Checkbox,
   DepartmentIcon,
   QuantityStepper,
@@ -41,6 +42,7 @@ function ShoppingListScreen({ navigation }) {
   const toast = useToast();
   const [items, setItems] = useState([]);
   const [text, setText] = useState("");
+  const [clearOpen, setClearOpen] = useState(false);
 
   useFocusEffect(
     useCallback(() => {
@@ -91,19 +93,25 @@ function ShoppingListScreen({ navigation }) {
     update(items.map((i) => (i === item ? { ...i, quantity: next } : i)));
   };
 
-  const clearChecked = () => {
-    if (done === 0) {
-      toast("אין פריטים מסומנים");
+  const openClear = () => {
+    if (items.length === 0) {
+      toast("הרשימה כבר ריקה");
       return;
     }
-    Alert.alert("מחיקת פריטים", "למחוק את המוצרים המסומנים?", [
-      { text: "ביטול", style: "cancel" },
-      {
-        text: "מחיקה",
-        style: "destructive",
-        onPress: () => update(items.filter((i) => !i.checked)),
-      },
-    ]);
+    setClearOpen(true);
+  };
+
+  // Clearing happens right away, with one tap to bring everything back.
+  const clear = (onlyChecked) => {
+    const before = items;
+    const next = onlyChecked ? items.filter((i) => !i.checked) : [];
+    const removed = before.length - next.length;
+    setClearOpen(false);
+    update(next);
+    toast(removed === 1 ? "מוצר אחד הוסר מהרשימה" : `${removed} מוצרים הוסרו מהרשימה`, {
+      label: "ביטול",
+      onPress: () => update(before),
+    });
   };
 
   // Plain text, so it lands in WhatsApp or Notes as a message instead of a file.
@@ -132,7 +140,7 @@ function ShoppingListScreen({ navigation }) {
           <Text style={styles.title}>קניות</Text>
           <View style={styles.actions}>
             <RoundButton icon="share-outline" onPress={share} />
-            <RoundButton icon="trash-outline" onPress={clearChecked} />
+            <RoundButton icon="trash-outline" onPress={openClear} />
           </View>
         </View>
 
@@ -210,11 +218,55 @@ function ShoppingListScreen({ navigation }) {
           ))
         )}
       </ScrollView>
+
+      <Sheet visible={clearOpen} onClose={() => setClearOpen(false)}>
+        <View style={{ gap: 10 }}>
+          <View style={{ gap: 2 }}>
+            <Text style={styles.sheetTitle}>ניקוי הרשימה</Text>
+            <Text style={styles.sheetSub}>
+              {done > 0
+                ? `ברשימה ${items.length} מוצרים, ${done} מהם כבר נאספו.`
+                : `ברשימה ${items.length} מוצרים, ואף אחד מהם עוד לא נאסף.`}
+            </Text>
+          </View>
+          {done > 0 && done < items.length && (
+            <TouchableOpacity style={styles.clearOption} activeOpacity={0.8} onPress={() => clear(true)}>
+              <Ionicons name="checkmark-circle-outline" size={22} color={C.ink} />
+              <View style={{ flex: 1, gap: 1 }}>
+                <Text style={styles.clearTitle}>מחיקת מה שנאסף</Text>
+                <Text style={styles.clearSub}>
+                  {done === 1 ? "המוצר המסומן יוסר" : `${done} המוצרים המסומנים יוסרו`},{" "}
+                  {items.length - done} נשארים
+                </Text>
+              </View>
+            </TouchableOpacity>
+          )}
+          <TouchableOpacity
+            style={[styles.clearOption, styles.clearDanger]}
+            activeOpacity={0.8}
+            onPress={() => clear(false)}
+          >
+            <Ionicons name="trash-outline" size={22} color={DANGER_FG} />
+            <View style={{ flex: 1, gap: 1 }}>
+              <Text style={[styles.clearTitle, { color: DANGER_FG }]}>ניקוי כל הרשימה</Text>
+              <Text style={[styles.clearSub, { color: DANGER_FG }]}>
+                {items.length === 1 ? "המוצר היחיד ברשימה יוסר" : `כל ${items.length} המוצרים יוסרו בבת אחת`}
+              </Text>
+            </View>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.clearCancel} onPress={() => setClearOpen(false)}>
+            <Text style={styles.clearCancelText}>ביטול</Text>
+          </TouchableOpacity>
+          <Text style={styles.clearNote}>מיד אחרי הניקוי אפשר לבטל אותו בלחיצה אחת.</Text>
+        </View>
+      </Sheet>
     </View>
   );
 }
 
 export default ShoppingListScreen;
+
+const DANGER_FG = "#9a3a25";
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: C.paper },
@@ -261,4 +313,24 @@ const styles = StyleSheet.create({
   itemText: { fontFamily: F.medium, fontSize: 15, color: C.ink },
   struck: { textDecorationLine: "line-through" },
   source: { fontFamily: F.body, fontSize: 12, color: C.faint, marginTop: 2 },
+  sheetTitle: { fontFamily: F.display700, fontSize: 20, color: C.ink },
+  sheetSub: { fontFamily: F.body, fontSize: 14, color: C.muted2 },
+  clearOption: {
+    minHeight: 64,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: C.line3,
+    backgroundColor: C.card,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+  },
+  clearDanger: { borderColor: "#e3c4ba", backgroundColor: "#fbf1ee" },
+  clearTitle: { fontFamily: F.semi, fontSize: 16, color: C.ink },
+  clearSub: { fontFamily: F.body, fontSize: 13, color: C.muted2 },
+  clearCancel: { height: 48, borderRadius: 14, alignItems: "center", justifyContent: "center" },
+  clearCancelText: { fontFamily: F.semi, fontSize: 15, color: C.ink },
+  clearNote: { fontFamily: F.body, fontSize: 13, color: C.muted2, textAlign: "center" },
 });

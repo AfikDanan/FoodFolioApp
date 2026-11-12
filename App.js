@@ -21,6 +21,7 @@ import { initDB } from "./util/database";
 import { splitShared } from "./util/share";
 import { loadShoppingList } from "./util/shopping";
 import { loadMeals } from "./util/mealSettings";
+import { loadPrefs } from "./util/prefs";
 import { I18nManager } from "react-native";
 import EditRecipeScreen from "./screens/EditRecipeScreen";
 import RecipeDetailScreen from "./screens/RecipeDetailScreen";
@@ -117,6 +118,7 @@ export default function App() {
         }
         await loadShoppingList(); // primes the cart badge
         await loadMeals();
+        await loadPrefs();
         setDbInitialized(true);
       } catch (e) {
         console.warn("Application setup failed:", e);
