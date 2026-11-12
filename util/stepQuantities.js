@@ -1,7 +1,7 @@
 // Finds where a cooking step mentions an ingredient, so the amount can be shown
 // right there ("מערבבים את הבשר הטחון [500 גרם] עם הבצל [1 יחידה]").
 // Pure text logic: no React, no database.
-import { displayUnit, formatQty } from "./recipeUtils";
+import { displayUnit, formatQty, parseQty } from "./recipeUtils";
 
 const HEB = "א-ת";
 // One-letter prefixes that attach to a Hebrew noun: ו, ה, ב, ל, מ, ש, כ.
@@ -12,10 +12,16 @@ const TO_FINAL = { כ: "ך", מ: "ם", נ: "ן", פ: "ף", צ: "ץ" };
 
 // First words that describe a part or a form, where the real ingredient is the
 // next word ("שיני שום" is mentioned in steps as "השום").
-const PART_WORDS = ["שיני", "שן", "עלי", "גרעיני", "קליפת", "גרידת", "פתיתי", "גבעולי", "ענפי", "צרור", "חבילת", "פחית", "קופסת"];
+// First words that describe a part or a form, where the real ingredient is the
+// next word ("שיני שום" is mentioned in steps as "השום").
+const PART_WORDS = [
+  "שיני", "שן", "עלי", "גרעיני", "קליפת", "גרידת", "פתיתי", "גבעולי", "ענפי", "צרור", "חבילת",
+  "פחית", "קופסת", "כרעיים", "כרעי", "חזה", "שוקי", "שוקיים", "כנפי", "כנפיים", "ירכי",
+  "ירכיים", "פילה", "נתחי", "קוביות", "פרוסות", "רצועות", "גבינת",
+];
 // First words that often name what is being cooked, not the ingredient
 // ("הרוטב" in a step is usually the sauce in the pot, not "רוטב סויה").
-const VAGUE_WORDS = ["רוטב", "מרק", "אבקת", "אבקה", "מיץ", "תערובת", "תבלין", "תבליני", "ממרח", "רסק", "שמן", "קמח", "גבינה", "גבינת", "פלפל", "בשר", "מים", "אורז"];
+const VAGUE_WORDS = ["רוטב", "מרק", "אבקת", "אבקה", "מיץ", "תערובת", "תבלין", "תבליני", "ממרח", "רסק", "מים", "בצק"];
 
 const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
@@ -67,6 +73,17 @@ export function amountLabel(quantity, unit) {
   if (!isFinite(q) || q <= 0) return "";
   const u = displayUnit(q, unit, true) || (q <= 1 ? "יחידה" : "יחידות");
   return `${formatQty(q)} ${u}`;
+}
+
+/** [{ name, label }] for a recipe's parsed ingredients, scaled by `factor`. */
+export function stepIngredientsFor(ingredients, factor = 1) {
+  return (ingredients || []).map((ing) => ({
+    name: ing.name,
+    label:
+      String(ing.quantity ?? "").trim() === ""
+        ? ""
+        : amountLabel(parseQty(ing.quantity) * factor, ing.unit),
+  }));
 }
 
 /**

@@ -60,6 +60,7 @@ You get one ingredient, the amount this recipe needs, the recipe title and the o
 Rules
 - Return 2 or 3 substitutes, best first (fewer only if nothing sensible exists, then an empty list). Prefer things an Israeli home kitchen or ordinary supermarket has, with no brand names and nothing exotic. Never return the original ingredient.
 - Keep the dish kosher: if the other ingredients include meat or poultry, never suggest a dairy substitute, and if they include dairy, never suggest meat. Respect the dish's character: do not turn a savory dish sweet or the reverse, and keep a vegan or vegetarian dish vegan or vegetarian.
+- "Must suit" lists the household's dietary requirements (for example vegetarian, vegan, kosher, an allergy, a food they avoid). Every substitute must meet all of them: for a vegetarian never suggest meat, poultry or fish; for a vegan also no dairy, eggs or honey; for an allergy nothing that contains the allergen. If the ingredient itself breaks a requirement, that is why it is being replaced.
 - quantity is the amount of the substitute that replaces the full amount given, in `unit`. unit must be one of: {", ".join(UNITS)}.
 - note: one short Hebrew sentence on how to use it and what changes (taste, texture, moisture, baking time). If the ingredient is structural (eggs or flour in baking), say what to adjust.
 - Write names and notes in Hebrew, short and plain.
@@ -72,5 +73,6 @@ def build_substitute_text(request) -> str:
         f"Ingredient: {request.ingredient}\n"
         f"Amount needed: {request.quantity} {request.unit}\n"
         f"Recipe: {request.recipe_title or '-'}\n"
-        f"Other ingredients: {others}"
+        f"Other ingredients: {others}\n"
+        f"Must suit: {', '.join(request.constraints) or '-'}"
     )

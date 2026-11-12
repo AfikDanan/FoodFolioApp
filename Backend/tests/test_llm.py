@@ -93,6 +93,24 @@ def test_substitute_request_uses_its_own_prompt_and_budget(monkeypatch):
     assert kw["max_output_tokens"] <= 1000
     text = kw["input"][0]["content"][0]["text"]
     assert "שמן" in text and "קמח" in text
+    assert "Must suit: -" in text
+
+
+def test_substitute_request_passes_dietary_constraints(monkeypatch):
+    from foodfolio.schemas import SubstituteRequest
+
+    responses = FakeResponses(FakeResult("parsed"))
+    use_client(monkeypatch, responses)
+    request = SubstituteRequest(
+        ingredient="חזה עוף",
+        quantity=400,
+        unit="גרם",
+        recipe_title="פסטה",
+        constraints=["צמחוני", "אלרגיה לאגוזים"],
+    )
+    llm.suggest_substitutes(request)
+    text = responses.kwargs["input"][0]["content"][0]["text"]
+    assert "Must suit: צמחוני, אלרגיה לאגוזים" in text
 
 
 def test_screenshots_are_sent_in_order(monkeypatch):

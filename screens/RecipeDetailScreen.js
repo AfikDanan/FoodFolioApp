@@ -21,7 +21,11 @@ import {
   Sheet,
   useToast,
 } from "../components/UI/kit";
+import StepText from "../components/StepText";
 import { fetchSubstitutes } from "../util/substitute";
+import { dietConflicts, dietParts, hasDiet, suitsDiet } from "../util/diet";
+import { usePrefs } from "../util/prefs";
+import { amountLabel } from "../util/stepQuantities";
 import { shareRecipes } from "../util/shareRecipes";
 import { addToShoppingList } from "../util/shopping";
 import {
@@ -52,6 +56,8 @@ function RecipeDetailScreen({ navigation, route }) {
   const [mult, setMult] = useState({}); // { index: multiplier } from the + / - controls
   const [editing, setEditing] = useState(null); // index of the row showing its stepper
   const [addSheet, setAddSheet] = useState(null); // { picked: { index: true } }
+  const [replacingAll, setReplacingAll] = useState(false);
+  const diet = usePrefs().diet;
 
   useEffect(() => {
     let alive = true;
@@ -72,6 +78,11 @@ function RecipeDetailScreen({ navigation, route }) {
   const steps = useMemo(() => (recipe ? parseSteps(recipe.instructions) : []), [recipe]);
   const tags = recipe ? parseJsonList(recipe.tags) : [];
   const estimated = recipe ? parseJsonList(recipe.est_idx) : [];
+  // { index: reason } for ingredients that do not suit the dietary preferences.
+  const conflicts = useMemo(
+    () => dietConflicts(ingredients.map((i) => i.name), diet),
+    [ingredients, diet]
+  );
 
   if (!recipe) {
     return <View style={styles.root} />;
@@ -99,25 +110,37 @@ function RecipeDetailScreen({ navigation, route }) {
     setMult((m) => ({ ...m, [index]: next / baseQty(index) }));
   };
 
-  const openSubstitutes = async (index) => {
+  // Ingredients still flagged: a replaced one is settled.
+  const flagged = Object.keys(conflicts)
+    .map(Number)
+    .filter((i) => !subs[i]);
+
+  // Suggestions for one ingredient, without anything the household does not eat.
+  const loadSubstitutes = async (index) => {
     const ing = ingredients[index];
+    const otherNames = ingredients.map((_, i) => i).filter((i) => i !== index).map(nameOf);
+    const options = await fetchSubstitutes({
+      ingredient: ing.name,
+      quantity: qtyOf(index),
+      unit: unitOf(index),
+      recipeTitle: recipe.title,
+      others: otherNames,
+      constraints: dietParts(diet),
+    });
+    return options.filter((o) => suitsDiet(o.name, diet, otherNames));
+  };
+
+  const openSubstitutes = async (index) => {
     setSubSheet({ index, loading: true, options: [], error: false });
     try {
-      const options = await fetchSubstitutes({
-        ingredient: ing.name,
-        quantity: qtyOf(index),
-        unit: unitOf(index),
-        recipeTitle: recipe.title,
-        others: ingredients.filter((_, i) => i !== index).map((i) => i.name),
-      });
+      const options = await loadSubstitutes(index);
       setSubSheet({ index, loading: false, options, error: false });
     } catch (e) {
       setSubSheet({ index, loading: false, options: [], error: true });
     }
   };
 
-  const applySubstitute = (option) => {
-    const index = subSheet.index;
+  const setSubstitute = (index, option) => {
     const original = parseQty(ingredients[index].quantity) * factor;
     setSubs((prev) => ({
       ...prev,
@@ -132,9 +155,50 @@ function RecipeDetailScreen({ navigation, route }) {
       delete next[index];
       return next;
     });
+  };
+
+  const applySubstitute = (option) => {
+    setSubstitute(subSheet.index, option);
     setSubSheet(null);
     toast("הוחלף ל" + option.name);
   };
+
+  // One tap for every flagged ingredient: take the best suggestion for each.
+  const replaceAllFlagged = async () => {
+    if (replacingAll) return;
+    setReplacingAll(true);
+    let replaced = 0;
+    let missed = 0;
+    for (const index of flagged) {
+      try {
+        const [best] = await loadSubstitutes(index);
+        if (best) {
+          setSubstitute(index, best);
+          replaced += 1;
+        } else {
+          missed += 1;
+        }
+      } catch (e) {
+        missed += 1;
+      }
+    }
+    setReplacingAll(false);
+    const done = replaced === 1 ? "מרכיב אחד הוחלף" : `${replaced} מרכיבים הוחלפו`;
+    if (!replaced) toast("לא מצאנו תחליפים מתאימים כרגע, נסו שוב בעוד רגע");
+    else if (missed) toast(`${done}. ל${missed === 1 ? "מרכיב אחד" : `־${missed} מרכיבים`} לא נמצא תחליף`);
+    else toast(`${done}. אפשר לבטל כל החלפה ברשימה`);
+  };
+
+  // What the steps show next to each ingredient: the amount on screen now, and
+  // the new name when the ingredient was replaced.
+  const stepIngredients = ingredients.map((ing, i) => {
+    const hasAmount = String(ing.quantity ?? "").trim() !== "";
+    const amount = hasAmount || subs[i] ? amountLabel(qtyOf(i), unitOf(i)) : "";
+    return {
+      name: ing.name,
+      label: subs[i] ? [subs[i].name, amount].filter(Boolean).join(" · ") : amount,
+    };
+  });
 
   const openAddSheet = () =>
     setAddSheet({ picked: Object.fromEntries(ingredients.map((_, i) => [i, true])) });
@@ -271,6 +335,52 @@ function RecipeDetailScreen({ navigation, route }) {
             </View>
           )}
 
+          {flagged.length > 0 && (
+            <View style={styles.dietBanner}>
+              <View style={styles.dietHead}>
+                <Ionicons name="warning-outline" size={22} color={C.warnFg} style={{ marginTop: 1 }} />
+                <View style={{ flex: 1, gap: 2 }}>
+                  <Text style={styles.dietTitle}>
+                    {flagged.length === 1
+                      ? "מרכיב אחד לא מתאים לך"
+                      : `${flagged.length} מרכיבים לא מתאימים לך`}
+                  </Text>
+                  <Text style={styles.dietSub}>לפי ההעדפות שלך: {dietParts(diet).join(", ")}.</Text>
+                </View>
+              </View>
+              <View style={styles.dietActions}>
+                <TouchableOpacity
+                  activeOpacity={0.85}
+                  disabled={replacingAll}
+                  style={[styles.dietPrimary, replacingAll && { opacity: 0.7 }]}
+                  onPress={flagged.length === 1 ? () => openSubstitutes(flagged[0]) : replaceAllFlagged}
+                >
+                  {replacingAll ? (
+                    <ActivityIndicator color={C.white} size="small" />
+                  ) : (
+                    <Ionicons name="swap-horizontal" size={16} color={C.white} />
+                  )}
+                  <Text style={styles.dietPrimaryText}>
+                    {replacingAll
+                      ? "מחפש תחליפים"
+                      : flagged.length === 1
+                      ? "החלפת המרכיב"
+                      : flagged.length === 2
+                      ? "החלפת שניהם"
+                      : "החלפת כולם"}
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  activeOpacity={0.85}
+                  style={styles.dietSecondary}
+                  onPress={() => navigation.navigate("Settings")}
+                >
+                  <Text style={styles.dietSecondaryText}>שינוי ההעדפות</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          )}
+
           <View style={styles.sectionRow}>
             <Text style={styles.sectionTitle}>מרכיבים</Text>
             <TouchableOpacity onPress={openAddSheet}>
@@ -285,9 +395,19 @@ function RecipeDetailScreen({ navigation, route }) {
               const on = !!checked[i];
               const sub = subs[i];
               const open = editing === i;
+              const reason = !sub ? conflicts[i] : null;
               const toggle = () => setChecked((c) => ({ ...c, [i]: !c[i] }));
               return (
-                <View key={i} style={[styles.ingRow, i > 0 && styles.divider]}>
+                <View
+                  key={i}
+                  style={[
+                    styles.ingRow,
+                    i > 0 && styles.divider,
+                    !!reason && styles.ingFlagged,
+                    i === 0 && styles.ingFirst,
+                    i === ingredients.length - 1 && styles.ingLast,
+                  ]}
+                >
                   <View style={styles.ingMain}>
                     <Checkbox checked={on} onPress={toggle} />
                     <TouchableOpacity
@@ -327,6 +447,21 @@ function RecipeDetailScreen({ navigation, route }) {
                       </Text>
                     </TouchableOpacity>
                   </View>
+                  {!!reason && (
+                    <View style={styles.flagRow}>
+                      <View style={styles.flagTag}>
+                        <Text style={styles.flagTagText}>{reason}</Text>
+                      </View>
+                      <TouchableOpacity
+                        activeOpacity={0.85}
+                        style={styles.flagBtn}
+                        onPress={() => openSubstitutes(i)}
+                      >
+                        <Ionicons name="swap-horizontal" size={16} color={C.white} />
+                        <Text style={styles.flagBtnText}>החלפה</Text>
+                      </TouchableOpacity>
+                    </View>
+                  )}
                   {open && (
                     <View style={styles.editRow}>
                       <QuantityStepper
@@ -354,7 +489,7 @@ function RecipeDetailScreen({ navigation, route }) {
                 <View style={styles.stepNum}>
                   <Text style={styles.stepNumText}>{i + 1}</Text>
                 </View>
-                <Text style={styles.stepText}>{s}</Text>
+                <StepText style={styles.stepText} text={s} ingredients={stepIngredients} />
               </View>
             ))}
           </View>
@@ -434,13 +569,22 @@ function RecipeDetailScreen({ navigation, route }) {
           <View style={{ gap: 14 }}>
             <View style={{ gap: 2 }}>
               <Text style={styles.sheetTitle}>תחליף ל{ingredients[subSheet.index]?.name}</Text>
-              <Text style={styles.sheetSub}>הכמויות מחושבות לכמות במתכון הזה</Text>
+              <Text style={styles.sheetSub}>
+                {hasDiet(diet)
+                  ? "מתאימים להעדפות שלך, בכמות שהמתכון הזה צריך"
+                  : "הכמויות מחושבות לכמות במתכון הזה"}
+              </Text>
             </View>
             {subSheet.loading && (
               <ActivityIndicator color={C.accent} style={{ paddingVertical: 24 }} />
             )}
             {subSheet.error && (
               <Text style={styles.sheetSub}>לא הצלחנו להביא הצעות כרגע, נסו שוב בעוד רגע.</Text>
+            )}
+            {!subSheet.loading && !subSheet.error && subSheet.options.length === 0 && (
+              <Text style={styles.sheetSub}>
+                לא מצאנו תחליף מתאים למרכיב הזה. אפשר לוותר עליו, או לנסות שוב בעוד רגע.
+              </Text>
             )}
             {subSheet.options.map((o) => (
               <TouchableOpacity
@@ -474,7 +618,7 @@ function RecipeDetailScreen({ navigation, route }) {
         <TouchableOpacity
           activeOpacity={0.9}
           style={styles.ctaBtn}
-          onPress={() => navigation.navigate("CookingMode", { recipeId: recipe.id, servings })}
+          onPress={() => navigation.navigate("CookingMode", { recipeId: recipe.id, servings, stepIngredients })}
         >
           <Ionicons name="flame-outline" size={22} color={C.white} />
           <Text style={styles.ctaText}>מצב בישול</Text>
@@ -593,6 +737,59 @@ const styles = StyleSheet.create({
   card: { backgroundColor: C.card, borderRadius: 18, borderWidth: 1, borderColor: C.line },
   empty: { fontFamily: F.body, color: C.muted, padding: 14 },
   ingRow: { paddingVertical: 11, paddingHorizontal: 14, gap: 10 },
+  ingFlagged: { backgroundColor: "#fbf4e8" },
+  ingFirst: { borderTopLeftRadius: 17, borderTopRightRadius: 17 },
+  ingLast: { borderBottomLeftRadius: 17, borderBottomRightRadius: 17 },
+  flagRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingStart: 34,
+  },
+  flagTag: {
+    height: 24,
+    paddingHorizontal: 9,
+    borderRadius: 12,
+    backgroundColor: "#f0dcc0",
+    justifyContent: "center",
+  },
+  flagTagText: { fontFamily: F.semi, fontSize: 12, color: C.warnFg },
+  flagBtn: {
+    height: 44,
+    paddingHorizontal: 16,
+    borderRadius: 22,
+    backgroundColor: C.ink,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  flagBtnText: { fontFamily: F.semi, fontSize: 14, color: C.white },
+  dietBanner: { backgroundColor: C.warnBg, borderRadius: 18, padding: 14, gap: 12, marginTop: 8 },
+  dietHead: { flexDirection: "row", gap: 10, alignItems: "flex-start" },
+  dietTitle: { fontFamily: F.bold, fontSize: 16, color: C.warnFg },
+  dietSub: { fontFamily: F.body, fontSize: 13, lineHeight: 18, color: C.warnFg },
+  dietActions: { flexDirection: "row", gap: 8 },
+  dietPrimary: {
+    flex: 1,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: C.warnFg,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+  },
+  dietPrimaryText: { fontFamily: F.semi, fontSize: 14, color: C.white },
+  dietSecondary: {
+    flex: 1,
+    height: 44,
+    borderRadius: 22,
+    borderWidth: 1,
+    borderColor: "#b98f63",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  dietSecondaryText: { fontFamily: F.semi, fontSize: 14, color: C.warnFg },
   ingMain: { flexDirection: "row", alignItems: "center", gap: 12 },
   qtyPill: {
     minHeight: 28,
@@ -624,7 +821,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   stepNumText: { fontFamily: F.bold, fontSize: 14, color: C.white },
-  stepText: { flex: 1, fontFamily: F.body, fontSize: 16, lineHeight: 26, color: C.ink },
+  stepText: { flex: 1, fontFamily: F.body, fontSize: 16, lineHeight: 28, color: C.ink },
   cta: { position: "absolute", left: 0, right: 0, bottom: 0, paddingTop: 28, paddingHorizontal: SCREEN_PAD },
   ctaBtn: {
     height: 56,

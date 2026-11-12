@@ -73,6 +73,19 @@ describe("annotateStep", () => {
     expect(flat(annotateStep("מוסיפים את הפפריקה.", list))).toBe("מוסיפים את הפפריקה.");
   });
 
+  it("finds the ingredient behind a cut or a form", () => {
+    const list = [
+      { name: "כרעיים עוף", label: "1½ ק\"ג" },
+      { name: "שמן זית", label: "3 כפות" },
+      { name: "פפריקה מתוקה", label: "1 כף" },
+      { name: "גבינת פטה", label: "100 גרם" },
+    ];
+    expect(flat(annotateStep("משפשפים את העוף בשמן, פפריקה ומלח ומניחים מעל.", list))).toBe(
+      "משפשפים את העוף[1½ ק\"ג] בשמן[3 כפות], פפריקה[1 כף] ומלח ומניחים מעל."
+    );
+    expect(flat(annotateStep("מפוררים פטה מעל ומגישים.", list))).toBe("מפוררים פטה[100 גרם] מעל ומגישים.");
+  });
+
   it("returns the text untouched when nothing matches", () => {
     expect(annotateStep("מחממים תנור.", ings)).toEqual(["מחממים תנור."]);
     expect(annotateStep("", ings)).toEqual([""]);

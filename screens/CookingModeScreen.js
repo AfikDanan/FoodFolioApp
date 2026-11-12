@@ -5,7 +5,9 @@ import { useKeepAwake } from "expo-keep-awake";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { fetchRecipeById } from "../util/database";
 import { RoundButton, useToast } from "../components/UI/kit";
-import { parseSteps } from "../util/recipeUtils";
+import StepText from "../components/StepText";
+import { parseIngredients, parseSteps } from "../util/recipeUtils";
+import { stepIngredientsFor } from "../util/stepQuantities";
 import { C, F } from "../constants/theme";
 
 const MINUTES_RE = /(\d+)\s*דקות/;
@@ -30,6 +32,16 @@ function CookingModeScreen({ navigation, route }) {
   }, [route.params.recipeId]);
 
   const steps = useMemo(() => (recipe ? parseSteps(recipe.instructions) : []), [recipe]);
+  // Amounts shown inside the steps: what the recipe page had on screen (servings,
+  // substitutions), or the recipe as written when opened from elsewhere.
+  const passed = route.params.stepIngredients;
+  const servings = route.params.servings;
+  const stepIngredients = useMemo(() => {
+    if (passed) return passed;
+    if (!recipe) return [];
+    const factor = servings ? servings / (recipe.servings || 4) : 1;
+    return stepIngredientsFor(parseIngredients(recipe.ingredients), factor);
+  }, [passed, recipe, servings]);
 
   const timersRef = useRef(timers);
   timersRef.current = timers;
@@ -108,7 +120,7 @@ function CookingModeScreen({ navigation, route }) {
         <Text style={styles.stepLabel}>
           שלב {step + 1} מתוך {steps.length}
         </Text>
-        <Text style={styles.stepText}>{text}</Text>
+        <StepText large dark style={styles.stepText} text={text} ingredients={stepIngredients} />
       </ScrollView>
 
       {total !== null && (

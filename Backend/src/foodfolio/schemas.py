@@ -184,6 +184,10 @@ class SubstituteRequest(BaseModel):
     other_ingredients: list[Annotated[str, Field(max_length=80)]] = Field(
         default_factory=list, max_length=40
     )
+    # The household's dietary preferences in words ("צמחוני", "אלרגיה לאגוזים").
+    constraints: list[Annotated[str, Field(max_length=60)]] = Field(
+        default_factory=list, max_length=12
+    )
 
 
 class ModelSubstitute(BaseModel):
