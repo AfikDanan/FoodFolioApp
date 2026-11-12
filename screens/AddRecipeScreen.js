@@ -45,6 +45,10 @@ import {
   useToast,
 } from "../components/UI/kit";
 import { C, F, SCREEN_PAD } from "../constants/theme";
+import { READ_INSTAGRAM_IN_WEBVIEW } from "../constants/config";
+
+// Loaded only when the feature is on, so switching the flag off never touches the native module.
+const CaptionReader = READ_INSTAGRAM_IN_WEBVIEW ? require("../components/CaptionReader").default : null;
 
 const SOCIAL_ERRORS = ["needs-caption", "social-no-recipe"];
 
@@ -113,6 +117,29 @@ function AddRecipeScreen({ navigation, route }) {
   const [categoriesLoaded, setCategoriesLoaded] = useState(false);
   const handledShare = useRef(null);
 
+  // Instagram never shows a server its caption, so read the post in a hidden WebView on
+  // the phone first (see CaptionReader). Detecting the host here, not from an API error,
+  // also works against an API that has not been redeployed.
+  const [readerUrl, setReaderUrl] = useState(null);
+  const readerDone = useRef(null);
+  const readCaption = (u) =>
+    new Promise((resolve) => {
+      readerDone.current = resolve;
+      setReaderUrl(u);
+    });
+  const finishReader = (text) => {
+    setReaderUrl(null);
+    readerDone.current?.(text);
+    readerDone.current = null;
+  };
+  const importLink = async (link, names, text = "") => {
+    if (CaptionReader && /^https?:\/\/([\w-]+\.)?instagram\.com\//i.test(link)) {
+      const caption = await readCaption(link);
+      if (caption) return importFromText(caption, names);
+    }
+    return importFromUrl(link, names, text);
+  };
+
   useEffect(() => {
     fetchAllCategories().then((c) => {
       setCategories(c || []);
@@ -138,7 +165,7 @@ function AddRecipeScreen({ navigation, route }) {
       setTab("link");
       setUrl(shared.url);
       setPasted(shared.text || "");
-      runImport(() => importFromUrl(shared.url, names, shared.text), shared.url);
+      runImport(() => importLink(shared.url, names, shared.text), shared.url);
     } else if ((shared.text || "").length >= 20) {
       setTab("link");
       setPasted(shared.text);
@@ -197,7 +224,7 @@ function AddRecipeScreen({ navigation, route }) {
       const names = categories.map((c) => c.name);
       runImport(() =>
         url.trim()
-          ? importFromUrl(url.trim(), names, pasted)
+          ? importLink(url.trim(), names, pasted)
           : importFromText(pasted, names),
         url.trim() || null
       );
@@ -338,6 +365,7 @@ function AddRecipeScreen({ navigation, route }) {
         <Text style={styles.title}>{TITLES[phase]}</Text>
         <RoundButton icon="close" onPress={() => navigation.goBack()} />
       </View>
+      {readerUrl && CaptionReader ? <CaptionReader url={readerUrl} onDone={finishReader} /> : null}
 
       {phase === "form" && (
         <>
