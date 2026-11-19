@@ -84,7 +84,7 @@ const firstWords = (title, n) => String(title || "").trim().split(/\s+/).slice(0
 /**
  * items: [{ r, factor }] with r a normalized recipe (id, title, time, steps, row)
  * and factor the amount multiplier. Returns one track per recipe:
- * { id, n, title, short, color, steps: [{ text, kind, minutes }], ingredients }.
+ * { id, n, title, short, color, factor, servings, steps: [{ text, kind, minutes }], ingredients }.
  */
 export function buildTracks(items) {
   const usable = items.filter((x) => x.r && x.r.steps && x.r.steps.length);
@@ -107,23 +107,50 @@ export function buildTracks(items) {
       title: x.r.title,
       short: firstWords(x.r.title, shared ? 2 : 1),
       color: TRACK_COLORS[index % TRACK_COLORS.length],
+      factor: x.factor || 1,
+      servings: Math.round((x.r.servings || 4) * (x.factor || 1)),
       steps: steps.map(({ text, kind, minutes }) => ({ text, kind, minutes })),
       ingredients: stepIngredientsFor(parseIngredients(x.r.row?.ingredients), x.factor || 1),
     };
   });
 }
 
+/**
+ * The plan's order as blocks of work: consecutive steps of the same recipe
+ * become one block, ending where the recipe starts cooking by itself (`wait`
+ * minutes) or where it is done. [{ at, ti, from, to, wait, last }].
+ */
+export function workBlocks(tracks, order) {
+  const blocks = [];
+  for (const o of order) {
+    const prev = blocks[blocks.length - 1];
+    if (prev && prev.ti === o.ti && !prev.wait) {
+      prev.to = o.si;
+    } else {
+      blocks.push({ at: o.at, ti: o.ti, from: o.si, to: o.si, wait: 0 });
+    }
+    const b = blocks[blocks.length - 1];
+    if (o.kind === "passive") b.wait = o.minutes;
+    b.last = b.to === tracks[o.ti].steps.length - 1;
+  }
+  return blocks;
+}
+
 const remaining = (track, i) =>
   track.steps.slice(i).reduce((a, s) => a + s.minutes + (s.kind === "passive" ? SETUP : 0), 0);
 
 /**
- * Which recipe the cook should turn to now, among those that are ready:
- * something whose timer just ended comes first (it is hot and waiting), then
- * whatever still has the longest road ahead, so long dishes start early.
+ * Which recipe the cook should turn to now, among those that are ready.
+ * The rule: stay with one recipe until it reaches a wait (a timer) or ends.
+ *  1. A recipe whose timer just ended comes first (it is hot and waiting).
+ *  2. Otherwise keep going with `last`, the recipe the cook just worked on.
+ *  3. Otherwise the recipe with the longest road ahead, so long dishes start early.
  * ready: [{ ti, i, fromTimer, since }]. Returns the track index, or -1.
  */
-export function chooseNext(tracks, ready) {
+export function chooseNext(tracks, ready, last = null) {
   if (!ready.length) return -1;
+  const hot = ready.filter((x) => x.fromTimer);
+  if (!hot.length && last !== null && ready.some((x) => x.ti === last)) return last;
   const sorted = ready.slice().sort((a, b) => {
     if (!!a.fromTimer !== !!b.fromTimer) return a.fromTimer ? -1 : 1;
     if (a.fromTimer && b.fromTimer && a.since !== b.since) return a.since - b.since;
@@ -134,11 +161,26 @@ export function chooseNext(tracks, ready) {
 }
 
 /**
+ * The recipe the cook last finished a hands-on step of, if it is still waiting
+ * for them: the one to keep going with. null when there is none.
+ */
+export function lastWorked(run) {
+  let best = null;
+  run.forEach((s, ti) => {
+    if (s.phase === "ready" && !s.fromTimer && s.since > 0 && (best === null || s.since > run[best].since)) {
+      best = ti;
+    }
+  });
+  return best;
+}
+
+/**
  * Play the whole session forward for one cook.
  * init (optional): [{ i, freeIn, fromTimer }] per track, in minutes from now.
+ * last (optional): the track the cook is in the middle of.
  * Returns { total, lanes: [[{ start, end, kind }]], order: [{ at, ti, si, kind, minutes }] }.
  */
-export function simulate(tracks, init) {
+export function simulate(tracks, init, last = null) {
   const st = tracks.map((_, ti) => ({
     i: init?.[ti]?.i ?? 0,
     freeAt: init?.[ti]?.freeIn ?? 0,
@@ -152,6 +194,7 @@ export function simulate(tracks, init) {
   });
   let t = 0;
   let guard = 0;
+  let cur = last;
   const open = () => st.some((s, ti) => s.i < tracks[ti].steps.length);
   while (open() && guard++ < 2000) {
     const ready = st
@@ -161,7 +204,7 @@ export function simulate(tracks, init) {
       t = Math.min(...st.filter((s, ti) => s.i < tracks[ti].steps.length).map((s) => s.freeAt));
       continue;
     }
-    const ti = chooseNext(tracks, ready);
+    const ti = chooseNext(tracks, ready, cur);
     const s = st[ti];
     const step = tracks[ti].steps[s.i];
     order.push({ at: t, ti, si: s.i, kind: step.kind, minutes: step.minutes });
@@ -171,11 +214,13 @@ export function simulate(tracks, init) {
       t += SETUP;
       s.freeAt = t + step.minutes;
       s.fromTimer = true;
+      cur = null; // it cooks by itself now: time to switch
     } else {
       lanes[ti].push({ start: t, end: t + step.minutes, kind: "active" });
       t += step.minutes;
       s.freeAt = t;
       s.fromTimer = false;
+      cur = ti;
     }
     s.i += 1;
   }
@@ -259,13 +304,16 @@ export function toggleTimer(run, ti, now) {
 export const timerLeft = (s, now) =>
   s.phase === "waiting" ? Math.max(0, s.endsAt - now) : s.phase === "paused" ? s.left : null;
 
-/** The track the guided view shows now: the sticky choice if still ready, else the best one. */
+/**
+ * The track the guided view shows now: the cook's own pick if still ready, else
+ * by the rule in chooseNext (stay with the recipe in hand until it waits).
+ */
 export function currentTrack(tracks, run, preferred) {
   if (preferred !== null && preferred !== undefined && run[preferred]?.phase === "ready") return preferred;
   const ready = run
     .map((s, ti) => ({ ti, i: s.i, fromTimer: s.fromTimer, since: s.since, phase: s.phase }))
     .filter((x) => x.phase === "ready");
-  return chooseNext(tracks, ready);
+  return chooseNext(tracks, ready, lastWorked(run));
 }
 
 export const allDone = (run) => run.length > 0 && run.every((s) => s.phase === "done");
@@ -319,7 +367,7 @@ export function minutesLeft(tracks, run, now) {
     freeIn: s.phase === "waiting" || s.phase === "paused" ? Math.ceil(timerLeft(s, now) / 60000) : 0,
     fromTimer: s.fromTimer || s.phase === "waiting" || s.phase === "paused",
   }));
-  return simulate(tracks, init).total;
+  return simulate(tracks, init, lastWorked(run)).total;
 }
 
 /** "1:05" from seconds or "2:10" from minutes, for timers and totals. */
