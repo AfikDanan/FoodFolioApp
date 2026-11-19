@@ -323,9 +323,9 @@ function BatchCooking({ recipes, meals: dayMeals, session, onSave, onShopping, o
               style={styles.bleed}
               contentContainerStyle={{ paddingHorizontal: SCREEN_PAD, gap: 8 }}
             >
-              <Chip label={`הכל ${recipes.length}`} on={!category} onPress={() => setCategory(null)} />
+              <Chip label={`הכל · ${recipes.length}`} on={!category} onPress={() => setCategory(null)} />
               {categories.map(([c, n]) => (
-                <Chip key={c} label={`${c} ${n}`} on={category === c} onPress={() => setCategory(c)} />
+                <Chip key={c} label={`${c} · ${n}`} on={category === c} onPress={() => setCategory(c)} />
               ))}
             </ScrollView>
             <Text style={styles.note}>
@@ -527,7 +527,14 @@ const styles = StyleSheet.create({
   card: { backgroundColor: C.card, borderWidth: 1, borderColor: C.line, borderRadius: 18, padding: 14, gap: 14 },
   fieldLabel: { fontFamily: F.semi, fontSize: 13, color: C.muted2 },
   row6: { flexDirection: "row", gap: 6 },
-  chip: { height: 36, borderRadius: 12, borderWidth: 1, alignItems: "center", justifyContent: "center" },
+  chip: {
+    height: 36,
+    borderRadius: 12,
+    borderWidth: 1,
+    paddingHorizontal: 14,
+    alignItems: "center",
+    justifyContent: "center",
+  },
   chipText: { fontFamily: F.semi, fontSize: 13 },
   stepper: { flexDirection: "row", alignItems: "center", gap: 8 },
   stepBtn: { alignItems: "center", justifyContent: "center" },

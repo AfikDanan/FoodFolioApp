@@ -62,7 +62,8 @@
             "image/*"
           ]
         }
-      ]
+      ],
+      "./plugins/withShareIntentReplayGuard"
     ],
     "extra": {
       "eas": {
