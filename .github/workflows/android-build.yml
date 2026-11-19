@@ -46,26 +46,25 @@ permissions:
 
 env:
   EXPO_PUBLIC_API_URL: https://ppjuj0cx0h.execute-api.eu-central-1.amazonaws.com
-  NODE_ENV: production
 
 jobs:
   android:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: 22
           cache: npm
 
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: 17
 
-      - uses: gradle/actions/setup-gradle@v4
+      - uses: gradle/actions/setup-gradle@v5
 
       - name: Install dependencies
         run: npm ci
@@ -123,7 +122,7 @@ jobs:
           fi
           rm -f "$RUNNER_TEMP/upload.jks"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v5
         with:
           name: foodfolio-android-${{ github.sha }}
           path: out/*
