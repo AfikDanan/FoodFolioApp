@@ -25,11 +25,13 @@ import {
   displayUnit,
   formatQty,
   hasPhoto,
+  ingredientsToText,
   parseIngredientLine,
   parseIngredients,
   parseQty,
   parseSteps,
   stepsToObject,
+  textToIngredients,
 } from "../util/recipeUtils";
 import { C, F, SCREEN_PAD } from "../constants/theme";
 
@@ -73,7 +75,7 @@ function EditRecipeScreen({ navigation, route }) {
         servings: recipe.servings || 4,
         image: recipe.image,
         sourceUrl: recipe.source_url || "",
-        ingredients: ings.map(ingredientLine).join("\n"),
+        ingredients: ingredientsToText(ings, ingredientLine),
         steps: parseSteps(recipe.instructions).join("\n"),
       });
       setReady(true);
@@ -95,11 +97,11 @@ function EditRecipeScreen({ navigation, route }) {
       return;
     }
     // Lines that were not touched keep their stored quantity and department.
-    const ingredients = form.ingredients
-      .split("\n")
-      .filter((l) => l.trim())
-      .map((line) => original.find((o) => ingredientLine(o) === line.trim()) || parseIngredientLine(line))
-      .filter((i) => i.name);
+    // A line ending with ":" ("לציפוי:") starts a part of the dish.
+    const ingredients = textToIngredients(
+      form.ingredients,
+      (line) => original.find((o) => ingredientLine(o) === line) || parseIngredientLine(line)
+    );
     const steps = form.steps.split("\n").filter((l) => l.trim());
     const ok = await updateRecipeWithCategories(
       recipeId,
@@ -185,7 +187,7 @@ function EditRecipeScreen({ navigation, route }) {
         </View>
 
         <Field
-          label="מרכיבים, אחד בכל שורה"
+          label="מרכיבים, אחד בכל שורה. שורה כמו „לציפוי:” פותחת חלק חדש"
           value={form.ingredients}
           height={160}
           onChangeText={set("ingredients")}

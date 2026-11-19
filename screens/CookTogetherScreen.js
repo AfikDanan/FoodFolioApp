@@ -216,7 +216,14 @@ function Guided({ tracks, run, now, current, onPick, onDone, onSkip, onPause, on
                 שלב {run[current].i + 1} מתוך {t.steps.length}
               </Text>
             </View>
-            <StepText large dark style={styles.bigStep} text={step.text} ingredients={t.ingredients} />
+            <StepText
+              large
+              dark
+              style={styles.bigStep}
+              text={step.text}
+              ingredients={t.ingredients}
+              stage={t.stages[run[current].i]}
+            />
             {step.kind === "passive" && (
               <View style={styles.passiveNote}>
                 <Ionicons name="timer-outline" size={18} color={MUTED} />
@@ -343,7 +350,13 @@ function Board({ tracks, run, now, current, onDone, onSkip, onPause }) {
                 }}
               />
             </View>
-            <StepText dark style={styles.cardStep} text={step.text} ingredients={t.ingredients} />
+            <StepText
+              dark
+              style={styles.cardStep}
+              text={step.text}
+              ingredients={t.ingredients}
+              stage={t.stages[s.i]}
+            />
             {left !== null ? (
               <View style={styles.rowCenter}>
                 <Ionicons name="time-outline" size={16} color={MUTED} />

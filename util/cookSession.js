@@ -3,7 +3,7 @@
 // steps of all recipes in a sensible order, and the state of a live session.
 // No React and no database, so it can be tested on its own.
 import { parseIngredients } from "./recipeUtils";
-import { stepIngredientsFor } from "./stepQuantities";
+import { stepIngredientsFor, stepStages } from "./stepQuantities";
 
 // One color per recipe, readable on the dark cooking background.
 export const TRACK_COLORS = ["#f0c15a", "#8ab8f0", "#5cc487", "#f2a48f", "#c9a7e8", "#7fd1c7"];
@@ -84,7 +84,8 @@ const firstWords = (title, n) => String(title || "").trim().split(/\s+/).slice(0
 /**
  * items: [{ r, factor }] with r a normalized recipe (id, title, time, steps, row)
  * and factor the amount multiplier. Returns one track per recipe:
- * { id, n, title, short, color, factor, servings, steps: [{ text, kind, minutes }], ingredients }.
+ * { id, n, title, short, color, factor, servings, steps: [{ text, kind, minutes }],
+ *   ingredients, stages } where stages[i] is the part of the dish step i is in.
  */
 export function buildTracks(items) {
   const usable = items.filter((x) => x.r && x.r.steps && x.r.steps.length);
@@ -101,6 +102,7 @@ export function buildTracks(items) {
       for (const s of guessed) s.minutes = Math.min(15, Math.max(1, Math.round(s.minutes * ratio)));
     }
     const shared = heads.filter((h) => h === heads[index]).length > 1;
+    const ingredients = stepIngredientsFor(parseIngredients(x.r.row?.ingredients), x.factor || 1);
     return {
       id: x.r.id,
       n: index + 1,
@@ -110,7 +112,8 @@ export function buildTracks(items) {
       factor: x.factor || 1,
       servings: Math.round((x.r.servings || 4) * (x.factor || 1)),
       steps: steps.map(({ text, kind, minutes }) => ({ text, kind, minutes })),
-      ingredients: stepIngredientsFor(parseIngredients(x.r.row?.ingredients), x.factor || 1),
+      ingredients,
+      stages: stepStages(x.r.steps, ingredients),
     };
   });
 }

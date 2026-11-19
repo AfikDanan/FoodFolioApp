@@ -7,14 +7,16 @@ import { C, F } from "../constants/theme";
 /**
  * A cooking step with each ingredient's amount shown as a small pill right
  * after its name. Follows the "כמויות בתוך שלבי ההכנה" setting unless `show`
- * is passed. ingredients: [{ name, label }].
+ * is passed. ingredients: [{ name, label, group }]. stage: the part of the dish
+ * the step is in ("לציפוי"), so an ingredient used in several parts shows the
+ * right amount (see stepStages).
  */
-export default function StepText({ text, ingredients, style, large, dark, show, numberOfLines }) {
+export default function StepText({ text, ingredients, stage, style, large, dark, show, numberOfLines }) {
   const prefs = usePrefs();
   const on = show ?? prefs.stepQuantities;
   const parts = useMemo(
-    () => (on ? annotateStep(text, ingredients) : [String(text || "")]),
-    [on, text, ingredients]
+    () => (on ? annotateStep(text, ingredients, stage) : [String(text || "")]),
+    [on, text, ingredients, stage]
   );
   return (
     <Text style={style} numberOfLines={numberOfLines}>

@@ -104,6 +104,7 @@ def _clean_embedded(raw, categories: list[str]) -> dict | None:
                 "department": department if department in DEPARTMENTS else "אחר",
                 "estimated": False,
                 "optional": bool(item.get("optional")),
+                "group": _text(item.get("group"), 40) or None,
             }
         )
     steps = [_text(s, 2000) for s in (raw.get("steps") or [])[:60]]

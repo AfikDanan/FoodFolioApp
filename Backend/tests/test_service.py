@@ -22,6 +22,7 @@ def ingredient(**kw):
         department="יבשים ואפייה",
         estimated=False,
         optional=False,
+        group=None,
     )
     return ModelIngredient(**{**base, **kw})
 
@@ -184,7 +185,7 @@ def test_clean_recipe_strips_step_numbers_and_hashtags():
     assert recipe.tags == ["מהיר", "צמחוני"]
 
 
-def test_same_ingredient_in_several_groups_becomes_one_line():
+def test_same_ingredient_twice_in_one_list_becomes_one_line():
     raw = model_recipe(
         ingredients=[
             ingredient(name="קמח", quantity=2.0),
@@ -199,6 +200,30 @@ def test_same_ingredient_in_several_groups_becomes_one_line():
     assert [(i.quantity, i.unit) for i in flour] == [(2.5, "כוס"), (1.0, "גרם")]
     assert recipe.ingredients[1].unit == "שן"
     assert recipe.ingredients[-1].optional is True
+
+
+def test_parts_of_the_dish_keep_their_own_amounts():
+    raw = model_recipe(
+        ingredients=[
+            ingredient(name="סוכר", quantity=1.0, group="לבצק"),
+            ingredient(name="קמח", quantity=2.0, group="לבצק"),
+            ingredient(name="סוכר", quantity=0.5, group=" לציפוי: "),
+        ]
+    )
+    recipe = service.clean_recipe(raw, [])
+    sugar = [(i.quantity, i.group) for i in recipe.ingredients if i.name == "סוכר"]
+    assert sugar == [(1.0, "לבצק"), (0.5, "לציפוי")]
+
+
+def test_one_heading_over_the_whole_list_is_dropped():
+    raw = model_recipe(
+        ingredients=[
+            ingredient(name="קמח", group="מצרכים"),
+            ingredient(name="סוכר", group="מצרכים"),
+        ]
+    )
+    recipe = service.clean_recipe(raw, [])
+    assert [i.group for i in recipe.ingredients] == [None, None]
 
 
 def test_metric_units_come_back_as_the_abbreviations_the_app_stores():

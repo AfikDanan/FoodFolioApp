@@ -62,6 +62,7 @@ class ModelIngredient(BaseModel):
     department: Department
     estimated: bool  # True when the quantity is not stated in the source
     optional: bool  # the source marks it optional ("אופציונלי", "לפי הטעם להגשה")
+    group: str | None  # the part of the dish it is for ("לבצק", "לציפוי"), or None
 
 
 class ModelRecipe(BaseModel):
@@ -157,6 +158,8 @@ class Ingredient(BaseModel):
     department: Department
     estimated: bool = False
     optional: bool = False
+    # The part of the dish it is for ("לבצק", "לציפוי"). None for a single list.
+    group: str | None = None
 
 
 class Recipe(BaseModel):

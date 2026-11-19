@@ -11,6 +11,7 @@ import {
   displayUnit,
   fridgeDays,
   formatQty,
+  ingredientGroups,
   parseIngredients,
   parseJsonList,
   parseMinutes,
@@ -72,6 +73,7 @@ export function recipeData(row) {
       unit: i.unit || "יחידה",
       department: i.department || "אחר",
       ...(i.optional ? { optional: true } : null),
+      ...(i.group ? { group: String(i.group) } : null),
     }));
   return {
     v: 1,
@@ -143,13 +145,19 @@ function recipeSection(row, index, total, image) {
         <div class="cols">
           <div>
             <h2>מרכיבים</h2>
-            <div class="card ings">${d.ingredients
+            <div class="card ings">${ingredientGroups(d.ingredients)
               .map(
-                (i) => `<div class="ing${i.optional ? " opt" : ""}">
+                (g) =>
+                  (g.name ? `<div class="part">${escapeHtml(g.name)}</div>` : "") +
+                  g.items
+                    .map(
+                      ({ ing: i }) => `<div class="ing${i.optional ? " opt" : ""}">
                   <span class="dot"></span>
                   <span class="name">${escapeHtml(i.name)}${i.optional ? `<small>אופציונלי</small>` : ""}</span>
                   ${qtyLabel(i) ? `<span class="qty">${escapeHtml(qtyLabel(i))}</span>` : ""}
                 </div>`
+                    )
+                    .join("")
               )
               .join("")}</div>
           </div>
@@ -266,6 +274,8 @@ export function recipesToHtml(rows, { images = {}, fonts = {}, title } = {}) {
       .card { background: ${T.card}; border: 1px solid ${T.line}; border-radius: 18px; }
       .ing { display: flex; align-items: center; gap: 10px; padding: 9px 14px; break-inside: avoid; }
       .ing + .ing { border-top: 1px solid ${T.line}; }
+      .part { padding: 10px 14px 4px; color: ${T.accent}; font-weight: 600; font-size: 13px; break-after: avoid; }
+      .part:not(:first-child) { border-top: 1px solid ${T.line}; }
       .dot { width: 8px; height: 8px; border-radius: 50%; background: ${T.accent}; flex: none; }
       .ing.opt .dot { background: transparent; border: 1.5px solid ${T.faint}; }
       .name { flex: 1; font-size: 14px; }
@@ -299,7 +309,10 @@ export function recipesToText(rows) {
         [d.total_time, `${d.servings} מנות`].filter(Boolean).join(" · "),
         "",
         "מרכיבים",
-        ...d.ingredients.map((i) => `• ${ingredientLine(i)}`),
+        ...ingredientGroups(d.ingredients).flatMap((g) => [
+          ...(g.name ? [`${g.name}:`] : []),
+          ...g.items.map(({ ing }) => `• ${ingredientLine(ing)}`),
+        ]),
         "",
         "אופן ההכנה",
         ...d.steps.map((s, n) => `${n + 1}. ${s}`),

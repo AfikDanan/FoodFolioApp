@@ -31,7 +31,9 @@ import { isSocialUrl } from "../util/share";
 import {
   displayUnit,
   formatQty,
+  ingredientGroups,
   parseIngredientLine,
+  textToIngredients,
   parseQty,
   stepsToObject,
   tintFor,
@@ -233,11 +235,8 @@ function AddRecipeScreen({ navigation, route }) {
         fromImages: true,
       });
     } else {
-      const ingredients = manual.ingredients
-        .split("\n")
-        .filter((l) => l.trim())
-        .map(parseIngredientLine)
-        .filter((i) => i.name);
+      // A line ending with ":" ("לציפוי:") starts a part of the dish.
+      const ingredients = textToIngredients(manual.ingredients, parseIngredientLine);
       setDraft(
         toDraft({
           title: manual.title,
@@ -480,7 +479,7 @@ function AddRecipeScreen({ navigation, route }) {
                   onChangeText={(t) => setManual((m) => ({ ...m, title: t }))}
                 />
                 <Field
-                  label="מרכיבים, אחד בכל שורה"
+                  label="מרכיבים, אחד בכל שורה. שורה כמו „לציפוי:” פותחת חלק חדש"
                   value={manual.ingredients}
                   height={120}
                   onChangeText={(t) => setManual((m) => ({ ...m, ingredients: t }))}
@@ -620,15 +619,20 @@ function AddRecipeScreen({ navigation, route }) {
               <Text style={styles.labelSub}>משויכים למחלקות בסופר</Text>
             </View>
             <View style={styles.card}>
-              {draft.ingredients.map((ing, i) => (
-                <View key={i} style={[styles.ingRow, i > 0 && styles.divider]}>
-                  <Text style={styles.ingText}>
-                    {formatQty(parseQty(ing.quantity))} {displayUnit(parseQty(ing.quantity), ing.unit) ? `${displayUnit(parseQty(ing.quantity), ing.unit)} ` : ""}
-                    {ing.name}
-                  </Text>
-                  <DepartmentIcon name={ing.department} size={20} />
-                  <Text style={styles.deptName}>{ing.department}</Text>
-                </View>
+              {ingredientGroups(draft.ingredients).map((g, gi) => (
+                <React.Fragment key={`g${gi}`}>
+                  {!!g.name && <Text style={[styles.groupHead, gi > 0 && styles.divider]}>{g.name}</Text>}
+                  {g.items.map(({ ing, index: i }, k) => (
+                    <View key={i} style={[styles.ingRow, (k > 0 || (gi > 0 && !g.name)) && styles.divider]}>
+                      <Text style={styles.ingText}>
+                        {formatQty(parseQty(ing.quantity))} {displayUnit(parseQty(ing.quantity), ing.unit) ? `${displayUnit(parseQty(ing.quantity), ing.unit)} ` : ""}
+                        {ing.name}
+                      </Text>
+                      <DepartmentIcon name={ing.department} size={20} />
+                      <Text style={styles.deptName}>{ing.department}</Text>
+                    </View>
+                  ))}
+                </React.Fragment>
               ))}
             </View>
             <Text style={styles.meta}>{draft.steps.length} שלבי הכנה זוהו</Text>
@@ -886,6 +890,7 @@ const styles = StyleSheet.create({
   ingRow: { flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 11, paddingHorizontal: 14 },
   divider: { borderTopWidth: 1, borderTopColor: C.line2 },
   ingText: { flex: 1, fontFamily: F.medium, fontSize: 14, color: C.ink },
+  groupHead: { fontFamily: F.semi, fontSize: 14, color: C.accent, paddingTop: 12, paddingBottom: 4, paddingHorizontal: 14 },
   deptImg: { width: 20, height: 20, resizeMode: "contain" },
   deptName: { fontFamily: F.medium, fontSize: 11, color: C.muted, minWidth: 56 },
   ctaWrap: { paddingHorizontal: SCREEN_PAD, paddingTop: 8 },
