@@ -24,6 +24,7 @@ export function toDraft(raw) {
         name: String(i.name),
         quantity: i.quantity ?? 1,
         optional: !!i.optional,
+        ...(i.group ? { group: String(i.group) } : null),
         unit: i.unit || "יחידה",
         department: departmentNames.includes(i.department)
           ? i.department

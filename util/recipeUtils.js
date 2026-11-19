@@ -370,3 +370,62 @@ export function sourceInfo(url) {
   if (known) return { url: link, label: known[1], icon: known[2] };
   return { url: link, label: host.replace(/^www\./, ""), icon: "link-outline" };
 }
+
+// ---- Parts of a dish ("לבצק", "לציפוי") ------------------------------------
+// An ingredient may carry `group`: the part of the dish it is for. The same
+// ingredient can appear in several parts, each with its own amount; only the
+// shopping list adds them up.
+
+export const groupOf = (ing) => {
+  const g = String(ing?.group ?? "").trim();
+  return g || null;
+};
+
+/**
+ * The ingredients in their parts, in order: [{ name, items: [{ ing, index }] }].
+ * A recipe without parts gives one entry whose name is null.
+ */
+export function ingredientGroups(ingredients) {
+  const out = [];
+  (ingredients || []).forEach((ing, index) => {
+    const name = groupOf(ing);
+    let g = out.find((x) => x.name === name);
+    if (!g) {
+      g = { name, items: [] };
+      out.push(g);
+    }
+    g.items.push({ ing, index });
+  });
+  return out;
+}
+
+const HEADING = /[:׃]\s*$/;
+
+/** Ingredients as editable text: a part's heading on its own line ends with ":". */
+export function ingredientsToText(ingredients, line) {
+  return ingredientGroups(ingredients)
+    .map((g) => [...(g.name ? [`${g.name}:`] : []), ...g.items.map((x) => line(x.ing))].join("\n"))
+    .join("\n");
+}
+
+/**
+ * Back from text: a line ending with ":" starts a part, the lines under it
+ * belong to it. `parse(line)` turns one ingredient line into an ingredient.
+ */
+export function textToIngredients(text, parse) {
+  let group = null;
+  const out = [];
+  for (const raw of String(text || "").split("\n")) {
+    const line = raw.trim();
+    if (!line) continue;
+    if (HEADING.test(line)) {
+      group = line.replace(HEADING, "").trim() || null;
+      continue;
+    }
+    const ing = parse(line);
+    if (!ing || !ing.name) continue;
+    const { group: _old, ...rest } = ing;
+    out.push(group ? { ...rest, group } : rest);
+  }
+  return out;
+}

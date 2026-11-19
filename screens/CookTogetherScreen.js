@@ -8,7 +8,7 @@ import { useToast } from "../components/UI/kit";
 import StepText from "../components/StepText";
 import { usePrefs } from "../util/prefs";
 import { loadCookRun, saveCookRun } from "../util/planStore";
-import { normalizeRecipe, timeLabel } from "../util/recipeUtils";
+import { formatQty, normalizeRecipe, timeLabel } from "../util/recipeUtils";
 import {
   allDone,
   buildTracks,
@@ -24,6 +24,7 @@ import {
   timerLeft,
   toggleTimer,
   upcoming,
+  workBlocks,
 } from "../util/cookSession";
 import { C, F } from "../constants/theme";
 
@@ -56,9 +57,7 @@ function Badge({ n, color, size = 20 }) {
 // ---- Before starting: one lane per recipe, and the order of work -----------
 function KitchenPlan({ tracks, plan, startMs, onStart }) {
   const total = Math.max(1, plan.total);
-  const key = plan.order.filter(
-    (o) => o.si === 0 || o.kind === "passive" || o.si === tracks[o.ti].steps.length - 1
-  );
+  const blocks = workBlocks(tracks, plan.order);
   return (
     <>
       <ScrollView style={{ flex: 1 }} contentContainerStyle={{ gap: 16, paddingBottom: 16 }}>
@@ -67,8 +66,9 @@ function KitchenPlan({ tracks, plan, startMs, onStart }) {
             {tracks.length} מתכונים במקביל, מוכנים עד {clockAt(startMs, plan.total)}
           </Text>
           <Text style={styles.sub}>
-            {timeLabel(Math.round(plan.total))} במטבח. מתחילים מהמתכון שלוקח הכי הרבה זמן, ובזמן
-            שהוא מתבשל עובדים על האחרים.
+            {timeLabel(Math.round(plan.total))} במטבח. עובדים על מתכון אחד עד שהוא נכנס לתנור או
+            לסיר ומתבשל לבד, ורק אז עוברים למתכון הבא. מתחילים מהמתכון הארוך, וכשטיימר מסתיים חוזרים
+            אליו.
           </Text>
         </View>
 
@@ -79,6 +79,10 @@ function KitchenPlan({ tracks, plan, startMs, onStart }) {
                 <Badge n={t.n} color={t.color} size={18} />
                 <Text style={styles.laneName} numberOfLines={1}>
                   {t.title}
+                </Text>
+                <Text style={styles.laneAmount}>
+                  {Math.abs(t.factor - 1) < 0.01 ? "" : `פי ${formatQty(t.factor)} · `}
+                  {t.servings} מנות
                 </Text>
               </View>
               <View style={styles.laneTrack}>
@@ -113,16 +117,31 @@ function KitchenPlan({ tracks, plan, startMs, onStart }) {
         </View>
 
         <Text style={styles.h2}>סדר העבודה</Text>
-        <View style={{ gap: 10 }}>
-          {key.map((o, i) => (
-            <View key={i} style={styles.orderRow}>
-              <Text style={styles.orderTime}>{clockAt(startMs, o.at)}</Text>
-              <Badge n={tracks[o.ti].n} color={tracks[o.ti].color} size={18} />
-              <Text style={styles.orderText} numberOfLines={2}>
-                {tracks[o.ti].steps[o.si].text}
-              </Text>
-            </View>
-          ))}
+        <View style={{ gap: 12 }}>
+          {blocks.map((b, i) => {
+            const t = tracks[b.ti];
+            const range = b.from === b.to ? `שלב ${b.from + 1}` : `שלבים ${b.from + 1}–${b.to + 1}`;
+            const then = b.wait
+              ? `ואז ${timeLabel(b.wait)} מתבשל לבד, עוברים למתכון הבא`
+              : b.last
+              ? "וסיימנו את המתכון"
+              : "";
+            return (
+              <View key={i} style={styles.orderRow}>
+                <Text style={styles.orderTime}>{clockAt(startMs, b.at)}</Text>
+                <Badge n={t.n} color={t.color} size={18} />
+                <View style={{ flex: 1, gap: 2 }}>
+                  <Text style={styles.orderText} numberOfLines={1}>
+                    <Text style={{ color: t.color }}>{t.short}</Text> · {range}
+                  </Text>
+                  <Text style={styles.orderSub} numberOfLines={2}>
+                    {t.steps[b.from].text}
+                  </Text>
+                  {!!then && <Text style={styles.orderThen}>{then}</Text>}
+                </View>
+              </View>
+            );
+          })}
         </View>
       </ScrollView>
       <TouchableOpacity activeOpacity={0.9} style={styles.cta} onPress={onStart}>
@@ -197,7 +216,14 @@ function Guided({ tracks, run, now, current, onPick, onDone, onSkip, onPause, on
                 שלב {run[current].i + 1} מתוך {t.steps.length}
               </Text>
             </View>
-            <StepText large dark style={styles.bigStep} text={step.text} ingredients={t.ingredients} />
+            <StepText
+              large
+              dark
+              style={styles.bigStep}
+              text={step.text}
+              ingredients={t.ingredients}
+              stage={t.stages[run[current].i]}
+            />
             {step.kind === "passive" && (
               <View style={styles.passiveNote}>
                 <Ionicons name="timer-outline" size={18} color={MUTED} />
@@ -324,7 +350,13 @@ function Board({ tracks, run, now, current, onDone, onSkip, onPause }) {
                 }}
               />
             </View>
-            <StepText dark style={styles.cardStep} text={step.text} ingredients={t.ingredients} />
+            <StepText
+              dark
+              style={styles.cardStep}
+              text={step.text}
+              ingredients={t.ingredients}
+              stage={t.stages[s.i]}
+            />
             {left !== null ? (
               <View style={styles.rowCenter}>
                 <Ionicons name="time-outline" size={16} color={MUTED} />
@@ -601,6 +633,7 @@ const styles = StyleSheet.create({
   chart: { backgroundColor: "rgba(255,255,255,0.06)", borderRadius: 18, padding: 14, gap: 12 },
   laneHead: { flexDirection: "row", alignItems: "center", gap: 8 },
   laneName: { flex: 1, fontFamily: F.semi, fontSize: 14, color: C.cookFg },
+  laneAmount: { fontFamily: F.body, fontSize: 12, color: MUTED },
   laneTrack: { height: 12, borderRadius: 6, backgroundColor: "rgba(255,255,255,0.08)" },
   legend: { flexDirection: "row", gap: 18, marginTop: 2 },
   legendItem: { flexDirection: "row", alignItems: "center", gap: 6 },
@@ -608,9 +641,11 @@ const styles = StyleSheet.create({
   legendText: { fontFamily: F.medium, fontSize: 12, color: MUTED },
   h2: { fontFamily: F.display700, fontSize: 18, color: C.cookFg },
   h3: { fontFamily: F.semi, fontSize: 14, color: MUTED },
-  orderRow: { flexDirection: "row", alignItems: "center", gap: 10 },
+  orderRow: { flexDirection: "row", alignItems: "flex-start", gap: 10 },
   orderTime: { width: 44, fontFamily: F.bold, fontSize: 14, color: C.cookFg, writingDirection: "ltr", textAlign: "left" },
-  orderText: { flex: 1, fontFamily: F.body, fontSize: 14, lineHeight: 20, color: C.cookFg },
+  orderText: { fontFamily: F.semi, fontSize: 14, lineHeight: 20, color: C.cookFg },
+  orderSub: { fontFamily: F.body, fontSize: 13, lineHeight: 19, color: MUTED },
+  orderThen: { fontFamily: F.body, fontSize: 12, lineHeight: 17, color: MUTED, fontStyle: "italic" },
   cta: {
     height: 60,
     borderRadius: 18,

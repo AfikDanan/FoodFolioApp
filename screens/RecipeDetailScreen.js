@@ -25,7 +25,7 @@ import StepText from "../components/StepText";
 import { fetchSubstitutes } from "../util/substitute";
 import { dietConflicts, dietParts, hasDiet, suitsDiet } from "../util/diet";
 import { usePrefs } from "../util/prefs";
-import { amountLabel } from "../util/stepQuantities";
+import { amountLabel, stepStages } from "../util/stepQuantities";
 import { shareRecipes } from "../util/shareRecipes";
 import { addToShoppingList } from "../util/shopping";
 import {
@@ -37,6 +37,7 @@ import {
   parseSteps,
   quantityStep,
   recipeTimeLabel,
+  ingredientGroups,
   sourceInfo,
   stepQuantity,
 } from "../util/recipeUtils";
@@ -76,6 +77,9 @@ function RecipeDetailScreen({ navigation, route }) {
   const factor = servings / base;
   const ingredients = useMemo(() => (recipe ? parseIngredients(recipe.ingredients) : []), [recipe]);
   const steps = useMemo(() => (recipe ? parseSteps(recipe.instructions) : []), [recipe]);
+  // The ingredients by part of the dish ("לבצק", "לציפוי"), and the part each step is in.
+  const groups = useMemo(() => ingredientGroups(ingredients), [ingredients]);
+  const stages = useMemo(() => stepStages(steps, ingredients), [steps, ingredients]);
   const tags = recipe ? parseJsonList(recipe.tags) : [];
   const estimated = recipe ? parseJsonList(recipe.est_idx) : [];
   // { index: reason } for ingredients that do not suit the dietary preferences.
@@ -196,6 +200,7 @@ function RecipeDetailScreen({ navigation, route }) {
     const amount = hasAmount || subs[i] ? amountLabel(qtyOf(i), unitOf(i)) : "";
     return {
       name: ing.name,
+      group: ing.group || null,
       label: subs[i] ? [subs[i].name, amount].filter(Boolean).join(" · ") : amount,
     };
   });
@@ -390,96 +395,103 @@ function RecipeDetailScreen({ navigation, route }) {
 
           <View style={styles.card}>
             {ingredients.length === 0 && <Text style={styles.empty}>אין מרכיבים</Text>}
-            {ingredients.map((ing, i) => {
-              const l = lineFor(ing, i);
-              const on = !!checked[i];
-              const sub = subs[i];
-              const open = editing === i;
-              const reason = !sub ? conflicts[i] : null;
-              const toggle = () => setChecked((c) => ({ ...c, [i]: !c[i] }));
-              return (
-                <View
-                  key={i}
-                  style={[
-                    styles.ingRow,
-                    i > 0 && styles.divider,
-                    !!reason && styles.ingFlagged,
-                    i === 0 && styles.ingFirst,
-                    i === ingredients.length - 1 && styles.ingLast,
-                  ]}
-                >
-                  <View style={styles.ingMain}>
-                    <Checkbox checked={on} onPress={toggle} />
-                    <TouchableOpacity
-                      activeOpacity={0.7}
-                      onPress={toggle}
-                      style={[{ flex: 1, gap: 1 }, on && { opacity: 0.45 }]}
+            {groups.map((g, gi) => (
+              <React.Fragment key={`g${gi}`}>
+                {!!g.name && (
+                  <Text style={[styles.groupHead, gi > 0 && styles.divider]}>{g.name}</Text>
+                )}
+                {g.items.map(({ ing, index: i }, k) => {
+                  const l = lineFor(ing, i);
+                  const on = !!checked[i];
+                  const sub = subs[i];
+                  const open = editing === i;
+                  const reason = !sub ? conflicts[i] : null;
+                  const toggle = () => setChecked((c) => ({ ...c, [i]: !c[i] }));
+                  return (
+                    <View
+                      key={i}
+                      style={[
+                        styles.ingRow,
+                        (k > 0 || (gi > 0 && !g.name)) && styles.divider,
+                        !!reason && styles.ingFlagged,
+                        gi === 0 && k === 0 && !g.name && styles.ingFirst,
+                        gi === groups.length - 1 && k === g.items.length - 1 && styles.ingLast,
+                      ]}
                     >
-                      <Text style={styles.ingText}>{l.name}</Text>
-                      {estimated.includes(i) && !sub && mult[i] === undefined && (
-                        <Text style={styles.estimated}>כמות משוערת, לא נאמרה בסרטון</Text>
-                      )}
-                      {!!sub && (
-                        <Text style={styles.subbed}>
-                          ✦ במקום {ing.name} ·{" "}
-                          <Text
-                            style={{ textDecorationLine: "underline" }}
-                            onPress={() =>
-                              setSubs((prev) => {
-                                const next = { ...prev };
-                                delete next[i];
-                                return next;
-                              })
-                            }
-                          >
-                            החזרה
-                          </Text>
-                        </Text>
-                      )}
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      activeOpacity={0.7}
-                      style={[styles.qtyPill, open && styles.qtyPillOn]}
-                      onPress={() => setEditing(open ? null : i)}
-                    >
-                      <Text style={[styles.qtyPillText, mult[i] !== undefined && { color: C.accent }]}>
-                        {l.qty}
-                      </Text>
-                    </TouchableOpacity>
-                  </View>
-                  {!!reason && (
-                    <View style={styles.flagRow}>
-                      <View style={styles.flagTag}>
-                        <Text style={styles.flagTagText}>{reason}</Text>
-                      </View>
-                      <TouchableOpacity
-                        activeOpacity={0.85}
-                        style={styles.flagBtn}
-                        onPress={() => openSubstitutes(i)}
-                      >
-                        <Ionicons name="swap-horizontal" size={16} color={C.white} />
-                        <Text style={styles.flagBtnText}>החלפה</Text>
-                      </TouchableOpacity>
-                    </View>
-                  )}
-                  {open && (
-                    <View style={styles.editRow}>
-                      <QuantityStepper
-                        label={l.qty}
-                        onDec={() => changeQty(i, -1)}
-                        onInc={() => changeQty(i, 1)}
-                      />
-                      {!sub && (
-                        <TouchableOpacity style={styles.subPill} onPress={() => openSubstitutes(i)}>
-                          <Ionicons name="swap-horizontal" size={14} color={C.muted2} />
-                          <Text style={styles.subPillText}>תחליף</Text>
+                      <View style={styles.ingMain}>
+                        <Checkbox checked={on} onPress={toggle} />
+                        <TouchableOpacity
+                          activeOpacity={0.7}
+                          onPress={toggle}
+                          style={[{ flex: 1, gap: 1 }, on && { opacity: 0.45 }]}
+                        >
+                          <Text style={styles.ingText}>{l.name}</Text>
+                          {estimated.includes(i) && !sub && mult[i] === undefined && (
+                            <Text style={styles.estimated}>כמות משוערת, לא נאמרה בסרטון</Text>
+                          )}
+                          {!!sub && (
+                            <Text style={styles.subbed}>
+                              ✦ במקום {ing.name} ·{" "}
+                              <Text
+                                style={{ textDecorationLine: "underline" }}
+                                onPress={() =>
+                                  setSubs((prev) => {
+                                    const next = { ...prev };
+                                    delete next[i];
+                                    return next;
+                                  })
+                                }
+                              >
+                                החזרה
+                              </Text>
+                            </Text>
+                          )}
                         </TouchableOpacity>
+                        <TouchableOpacity
+                          activeOpacity={0.7}
+                          style={[styles.qtyPill, open && styles.qtyPillOn]}
+                          onPress={() => setEditing(open ? null : i)}
+                        >
+                          <Text style={[styles.qtyPillText, mult[i] !== undefined && { color: C.accent }]}>
+                            {l.qty}
+                          </Text>
+                        </TouchableOpacity>
+                      </View>
+                      {!!reason && (
+                        <View style={styles.flagRow}>
+                          <View style={styles.flagTag}>
+                            <Text style={styles.flagTagText}>{reason}</Text>
+                          </View>
+                          <TouchableOpacity
+                            activeOpacity={0.85}
+                            style={styles.flagBtn}
+                            onPress={() => openSubstitutes(i)}
+                          >
+                            <Ionicons name="swap-horizontal" size={16} color={C.white} />
+                            <Text style={styles.flagBtnText}>החלפה</Text>
+                          </TouchableOpacity>
+                        </View>
+                      )}
+                      {open && (
+                        <View style={styles.editRow}>
+                          <QuantityStepper
+                            label={l.qty}
+                            onDec={() => changeQty(i, -1)}
+                            onInc={() => changeQty(i, 1)}
+                          />
+                          {!sub && (
+                            <TouchableOpacity style={styles.subPill} onPress={() => openSubstitutes(i)}>
+                              <Ionicons name="swap-horizontal" size={14} color={C.muted2} />
+                              <Text style={styles.subPillText}>תחליף</Text>
+                            </TouchableOpacity>
+                          )}
+                        </View>
                       )}
                     </View>
-                  )}
-                </View>
-              );
-            })}
+                  );
+                })}
+              </React.Fragment>
+            ))}
           </View>
 
           <Text style={[styles.sectionTitle, { marginTop: 8 }]}>אופן ההכנה</Text>
@@ -489,7 +501,7 @@ function RecipeDetailScreen({ navigation, route }) {
                 <View style={styles.stepNum}>
                   <Text style={styles.stepNumText}>{i + 1}</Text>
                 </View>
-                <StepText style={styles.stepText} text={s} ingredients={stepIngredients} />
+                <StepText style={styles.stepText} text={s} ingredients={stepIngredients} stage={stages[i]} />
               </View>
             ))}
           </View>
@@ -544,7 +556,10 @@ function RecipeDetailScreen({ navigation, route }) {
                     onPress={toggle}
                   >
                     <Checkbox checked={!!addSheet.picked[i]} onPress={toggle} />
-                    <Text style={styles.pickName}>{nameOf(i)}</Text>
+                    <Text style={styles.pickName}>
+                      {nameOf(i)}
+                      {!!ing.group && <Text style={styles.pickGroup}> · {ing.group}</Text>}
+                    </Text>
                     <Text style={styles.pickQty}>{l.qty}</Text>
                   </TouchableOpacity>
                 );
@@ -740,6 +755,7 @@ const styles = StyleSheet.create({
   ingFlagged: { backgroundColor: "#fbf4e8" },
   ingFirst: { borderTopLeftRadius: 17, borderTopRightRadius: 17 },
   ingLast: { borderBottomLeftRadius: 17, borderBottomRightRadius: 17 },
+  groupHead: { fontFamily: F.semi, fontSize: 14, color: C.accent, paddingTop: 12, paddingBottom: 4, paddingHorizontal: 14 },
   flagRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -805,6 +821,7 @@ const styles = StyleSheet.create({
   pickList: { maxHeight: 360, backgroundColor: C.card, borderRadius: 16, borderWidth: 1, borderColor: C.line },
   pickRow: { flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 11, paddingHorizontal: 14 },
   pickName: { flex: 1, fontFamily: F.medium, fontSize: 15, color: C.ink },
+  pickGroup: { fontFamily: F.body, fontSize: 13, color: C.muted },
   pickQty: { fontFamily: F.semi, fontSize: 13, color: C.muted },
   pickCta: { height: 54, borderRadius: 16, backgroundColor: C.accent, alignItems: "center", justifyContent: "center" },
   pickCtaText: { fontFamily: F.semi, fontSize: 16, color: C.white },

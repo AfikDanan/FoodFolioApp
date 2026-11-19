@@ -13,6 +13,7 @@ import {
   timerLeft,
   toggleTimer,
   upcoming,
+  workBlocks,
 } from "../cookSession";
 
 const recipe = (id, title, time, steps) => ({ id, title, time, steps, servings: 4, row: { ingredients: "[]" } });
@@ -103,6 +104,50 @@ describe("simulate", () => {
     const serial = tracks.reduce((a, t) => a + t.steps.reduce((b, s) => b + s.minutes, 0), 0);
     expect(plan.total).toBeLessThan(serial - 30);
     expect(plan.order).toHaveLength(10);
+  });
+});
+
+describe("staying with one recipe", () => {
+  const lentils = recipe(4, "מג'דרה", 45, [
+    "שוטפים עדשים.",
+    "קוצצים 3 בצלים.",
+    "מטגנים את הבצל עד שמשחים.",
+    "מוסיפים אורז ועדשים ומים ומבשלים 25 דקות.",
+  ]);
+  const tracks = buildTracks([chicken, soup, salad, lentils].map((r) => ({ r })));
+  const plan = simulate(tracks);
+
+  it("only switches recipe when one starts cooking by itself or is done", () => {
+    for (let k = 1; k < plan.order.length; k++) {
+      const prev = plan.order[k - 1];
+      const cur = plan.order[k];
+      if (cur.ti === prev.ti) continue;
+      const prevDone = prev.si === tracks[prev.ti].steps.length - 1;
+      const hot = cur.si > 0 && plan.order.find((o) => o.ti === cur.ti && o.si === cur.si - 1).kind === "passive";
+      expect(prev.kind === "passive" || prevDone || hot).toBe(true);
+    }
+  });
+
+  it("groups the order into blocks of work per recipe", () => {
+    const blocks = workBlocks(tracks, plan.order);
+    expect(blocks[0]).toMatchObject({ ti: 0, from: 0, to: 2, wait: 60 }); // chicken into the oven
+    expect(blocks[1]).toMatchObject({ ti: 1, from: 0, to: 2, wait: 35 }); // soup on the stove
+    expect(blocks.length).toBeLessThan(plan.order.length);
+  });
+
+  it("keeps the cook on the recipe in hand during a live session", () => {
+    const two = buildTracks([{ r: soup }, { r: lentils }]);
+    let run = startRun(two);
+    const first = currentTrack(two, run, null);
+    run = completeStep(two, run, first, 1000);
+    expect(currentTrack(two, run, null)).toBe(first);
+    run = completeStep(two, run, first, 2000);
+    expect(currentTrack(two, run, null)).toBe(first);
+  });
+
+  it("tells how much of each recipe is made", () => {
+    const [t] = buildTracks([{ r: soup, factor: 2 }]);
+    expect(t).toMatchObject({ factor: 2, servings: 8 });
   });
 });
 

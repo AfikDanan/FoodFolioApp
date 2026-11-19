@@ -85,6 +85,7 @@ def test_embedded_data_is_cleaned():
             "department": "אחר",
             "estimated": False,
             "optional": False,
+            "group": None,
         }
     ]
     assert recipe["steps"] == ["לבשל"]

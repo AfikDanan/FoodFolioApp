@@ -139,12 +139,19 @@ def _checked_images(request: ImageImport) -> list[str]:
     return request.all_images
 
 
+def _clean_group(value) -> str | None:
+    group = str(value or "").strip().strip(":").strip()[:40]
+    return group or None
+
+
 def _merge_duplicates(items) -> list[dict]:
-    """One line per ingredient: the same name and unit (flour for the dough and for
-    the coating) become a single entry with the amounts added, as on a shopping list."""
+    """One line per ingredient within a part of the dish: the same name and unit
+    listed twice in one part become a single entry with the amounts added. The same
+    ingredient in different parts (sugar for the dough and for the topping) stays
+    separate, because the cook measures them separately."""
     merged: dict[tuple, dict] = {}
     for item in items:
-        key = (item["name"], item["unit"], item["optional"])
+        key = (item["name"], item["unit"], item["optional"], item["group"])
         if key in merged:
             merged[key]["quantity"] += item["quantity"]
             merged[key]["estimated"] = merged[key]["estimated"] or item["estimated"]
@@ -152,7 +159,12 @@ def _merge_duplicates(items) -> list[dict]:
             merged[key] = dict(item)
     for item in merged.values():
         item["quantity"] = round(item["quantity"], 2)
-    return list(merged.values())
+    out = list(merged.values())
+    # A single heading over the whole list ("מצרכים") is not a part of the dish.
+    if len({item["group"] for item in out}) < 2:
+        for item in out:
+            item["group"] = None
+    return out
 
 
 def clean_recipe(raw: ModelRecipe, categories: list[str]) -> Recipe:
@@ -165,6 +177,7 @@ def clean_recipe(raw: ModelRecipe, categories: list[str]) -> Recipe:
             "department": ing.department,
             "estimated": ing.estimated or ing.quantity <= 0,
             "optional": ing.optional,
+            "group": _clean_group(ing.group),
         }
         for ing in raw.ingredients[:MAX_INGREDIENTS]
         if ing.name.strip()

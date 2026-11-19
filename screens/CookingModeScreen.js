@@ -7,7 +7,7 @@ import { fetchRecipeById } from "../util/database";
 import { RoundButton, useToast } from "../components/UI/kit";
 import StepText from "../components/StepText";
 import { parseIngredients, parseSteps } from "../util/recipeUtils";
-import { stepIngredientsFor } from "../util/stepQuantities";
+import { stepIngredientsFor, stepStages } from "../util/stepQuantities";
 import { C, F } from "../constants/theme";
 
 const MINUTES_RE = /(\d+)\s*דקות/;
@@ -42,6 +42,8 @@ function CookingModeScreen({ navigation, route }) {
     const factor = servings ? servings / (recipe.servings || 4) : 1;
     return stepIngredientsFor(parseIngredients(recipe.ingredients), factor);
   }, [passed, recipe, servings]);
+  // The part of the dish each step is in, so shared ingredients show the right amount.
+  const stages = useMemo(() => stepStages(steps, stepIngredients), [steps, stepIngredients]);
 
   const timersRef = useRef(timers);
   timersRef.current = timers;
@@ -120,7 +122,7 @@ function CookingModeScreen({ navigation, route }) {
         <Text style={styles.stepLabel}>
           שלב {step + 1} מתוך {steps.length}
         </Text>
-        <StepText large dark style={styles.stepText} text={text} ingredients={stepIngredients} />
+        <StepText large dark style={styles.stepText} text={text} ingredients={stepIngredients} stage={stages[step]} />
       </ScrollView>
 
       {total !== null && (

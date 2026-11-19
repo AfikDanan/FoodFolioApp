@@ -76,10 +76,11 @@ export function amountLabel(quantity, unit) {
   return `${formatQty(q)} ${u}`;
 }
 
-/** [{ name, label }] for a recipe's parsed ingredients, scaled by `factor`. */
+/** [{ name, label, group }] for a recipe's parsed ingredients, scaled by `factor`. */
 export function stepIngredientsFor(ingredients, factor = 1) {
   return (ingredients || []).map((ing) => ({
     name: ing.name,
+    group: ing.group || null,
     label:
       String(ing.quantity ?? "").trim() === ""
         ? ""
@@ -87,16 +88,71 @@ export function stepIngredientsFor(ingredients, factor = 1) {
   }));
 }
 
+// "לציפוי" -> "ציפוי", "עבור הרוטב" -> "הרוטב": how a step refers to that part.
+const stageWords = (group) =>
+  clean(group)
+    .replace(/^(?:עבור|בשביל|של)\s+/, "")
+    .replace(/^ל(?=[א-ת]{3,})/, "")
+    .split(" ")
+    .filter(Boolean);
+
 /**
- * text: one step. ingredients: [{ name, label }] with the amount already
- * formatted for the current servings. Returns the step as parts, in order:
- * strings, and { qty } objects placed right after the ingredient they belong to.
+ * Which part of the dish ("לבצק", "לציפוי") each step works on, or null. A step
+ * that names a part starts it; the steps after it stay with that part until
+ * another one is named. All nulls when the recipe has fewer than two parts.
  */
-export function annotateStep(text, ingredients) {
+export function stepStages(steps, ingredients) {
+  const groups = [...new Set((ingredients || []).map((i) => i.group).filter(Boolean))];
+  if (groups.length < 2) return (steps || []).map(() => null);
+  const words = groups.map(stageWords);
+  const firsts = words.map((w) => w[0]);
+  const patterns = groups.map((g, k) => {
+    const res = [phraseRegex(words[k])];
+    // "לקרם וניל" may be called just "הקרם", unless another part starts the same way.
+    if (words[k].length > 1 && firsts.filter((f) => f === firsts[k]).length === 1) res.push(phraseRegex([firsts[k]]));
+    return res;
+  });
+  let current = null;
+  return (steps || []).map((text) => {
+    const s = String(text || "");
+    let best = null;
+    patterns.forEach((res, k) => {
+      for (const re of res) {
+        re.lastIndex = 0;
+        const m = re.exec(s);
+        if (m && (best === null || m.index < best.at)) best = { at: m.index, group: groups[k] };
+      }
+    });
+    if (best) current = best.group;
+    return current;
+  });
+}
+
+/**
+ * The same ingredient in several parts (sugar for the dough and for the topping)
+ * keeps only the entry of `stage`; with no stage known its amount is left out
+ * rather than showing the wrong one. Other ingredients are untouched.
+ */
+function forStage(ingredients, stage) {
+  const count = {};
+  for (const ing of ingredients) {
+    const key = clean(ing.name);
+    count[key] = (count[key] || 0) + 1;
+  }
+  return ingredients.filter((ing) => count[clean(ing.name)] < 2 || (stage && ing.group === stage));
+}
+
+/**
+ * text: one step. ingredients: [{ name, label, group }] with the amount already
+ * formatted for the current servings. stage: the part of the dish the step is
+ * in (see stepStages). Returns the step as parts, in order: strings, and
+ * { qty } objects placed right after the ingredient they belong to.
+ */
+export function annotateStep(text, ingredients, stage = null) {
   const source = String(text || "");
   if (!source || !ingredients?.length) return [source];
 
-  const list = ingredients
+  const list = forStage(ingredients, stage)
     .map((ing) => ({ words: clean(ing.name).split(" ").filter(Boolean), label: ing.label }))
     .filter((x) => x.words.length && x.label);
 
