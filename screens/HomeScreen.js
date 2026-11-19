@@ -11,6 +11,7 @@ import { slotKey } from "../util/planner";
 import { useMeals } from "../util/mealSettings";
 import { loadPlan, savePlan, loadCookSession } from "../util/planStore";
 import { loadShoppingList } from "../util/shopping";
+import { useDoubleBackExit } from "../util/useDoubleBackExit";
 import { buildTracks, simulate } from "../util/cookSession";
 import { dateKey, dayName, greeting, longDate, nextDays, normalizeRecipe, timeLabel } from "../util/recipeUtils";
 import { C, F, SCREEN_PAD } from "../constants/theme";
@@ -24,6 +25,7 @@ const meta = (r) => [r.time ? timeLabel(r.time) : null, r.cat[0]].filter(Boolean
 function HomeScreen({ navigation }) {
   const insets = useSafeAreaInsets();
   const toast = useToast();
+  useDoubleBackExit(useCallback(() => toast("לחצו שוב על חזור כדי לצאת"), [toast]));
   const meals = useMeals();
   // The hero card is dinner when it is part of the day, else the last meal of the day.
   const heroMeal = meals.includes("ערב") ? "ערב" : meals[meals.length - 1];
