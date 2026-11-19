@@ -1,0 +1,138 @@
+# Builds the Android app on GitHub Actions instead of EAS Build.
+#
+# The repository is public, so standard GitHub-hosted runners are free with no
+# minute limit. The job runs `expo prebuild` to generate the native android/
+# folder (it is not committed), then builds with Gradle.
+#
+# Triggers:
+#   - manually from the Actions tab (choose apk or aab)
+#   - pushing a tag like v1.2.0 (builds both and attaches them to a release)
+#   - pull requests that touch this file (smoke test)
+#
+# Signing: add these repository secrets to sign with the real upload key
+# (download it once with `eas credentials -p android` -> "Download keystore"):
+#   ANDROID_KEYSTORE_BASE64   base64 of the .jks file
+#   ANDROID_KEYSTORE_PASSWORD
+#   ANDROID_KEY_ALIAS
+#   ANDROID_KEY_PASSWORD
+# Without them the build is signed with the debug key: fine to install for
+# testing, but Google Play will reject it and it cannot update an install that
+# came from the Play Store.
+#
+# Note: artifacts of a public repo can be downloaded by any signed-in GitHub
+# user. Do not put secrets into EXPO_PUBLIC_* variables (they end up in the app).
+
+name: Android build
+
+on:
+  workflow_dispatch:
+    inputs:
+      format:
+        description: "Output format"
+        type: choice
+        options: [apk, aab, both]
+        default: apk
+  push:
+    tags: ["v*"]
+  pull_request:
+    paths: [".github/workflows/android-build.yml"]
+
+concurrency:
+  group: android-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write # only used to attach files to a release on tag builds
+
+env:
+  EXPO_PUBLIC_API_URL: https://ppjuj0cx0h.execute-api.eu-central-1.amazonaws.com
+  NODE_ENV: production
+
+jobs:
+  android:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run unit tests
+        run: npm test -- --ci
+
+      - name: Generate native Android project
+        run: npx expo prebuild --platform android --clean --no-install
+
+      - name: Pick outputs
+        id: fmt
+        run: |
+          f="${{ inputs.format }}"
+          if [ "${{ github.event_name }}" = "push" ]; then f=both; fi
+          if [ -z "$f" ]; then f=apk; fi
+          tasks=""
+          [ "$f" = apk ] || [ "$f" = both ] && tasks="$tasks assembleRelease"
+          [ "$f" = aab ] || [ "$f" = both ] && tasks="$tasks bundleRelease"
+          echo "tasks=$tasks" >> "$GITHUB_OUTPUT"
+
+      - name: Build
+        working-directory: android
+        run: ./gradlew ${{ steps.fmt.outputs.tasks }} --no-daemon
+
+      - name: Sign with upload key
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          STORE_PASS: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASS: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          mkdir -p out
+          apk=android/app/build/outputs/apk/release/app-release.apk
+          aab=android/app/build/outputs/bundle/release/app-release.aab
+          if [ -z "$KEYSTORE_B64" ]; then
+            echo "::warning::No keystore secrets set, outputs are signed with the debug key"
+            [ -f "$apk" ] && cp "$apk" out/foodfolio-debugsigned.apk
+            [ -f "$aab" ] && cp "$aab" out/foodfolio-debugsigned.aab
+            exit 0
+          fi
+          echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/upload.jks"
+          if [ -f "$apk" ]; then
+            bt=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
+            "$bt/apksigner" sign --ks "$RUNNER_TEMP/upload.jks" \
+              --ks-pass env:STORE_PASS --ks-key-alias "$KEY_ALIAS" --key-pass env:KEY_PASS \
+              --out out/foodfolio.apk "$apk"
+          fi
+          if [ -f "$aab" ]; then
+            cp "$aab" out/foodfolio.aab
+            zip -q -d out/foodfolio.aab 'META-INF/*' || true
+            jarsigner -keystore "$RUNNER_TEMP/upload.jks" -storepass "$STORE_PASS" \
+              -keypass "$KEY_PASS" -sigalg SHA256withRSA -digestalg SHA-256 \
+              out/foodfolio.aab "$KEY_ALIAS"
+          fi
+          rm -f "$RUNNER_TEMP/upload.jks"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: foodfolio-android-${{ github.sha }}
+          path: out/*
+          retention-days: 14
+
+      - name: Attach to release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 || gh release create "$GITHUB_REF_NAME" --generate-notes
+          gh release upload "$GITHUB_REF_NAME" out/* --clobber
