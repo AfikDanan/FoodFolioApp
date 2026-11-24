@@ -95,6 +95,44 @@ def ingest(out: Path, chains: list[str], stores_wanted: dict[str, set[str]], max
     return report
 
 
+def probe(out: Path) -> dict:
+    """Record what each portal answers from here, raw, so format changes are visible."""
+    import socket
+    import urllib.request
+
+    from .sources import CERBERUS_HOST, SHUFERSAL_URL, USER_AGENT
+
+    out.mkdir(parents=True, exist_ok=True)
+    result: dict = {}
+
+    def http(name, url):
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
+            with urllib.request.urlopen(req, timeout=30) as r:
+                body = r.read()
+            (out / f"probe-{name}.html").write_bytes(body)
+            result[name] = {"status": r.status, "bytes": len(body)}
+        except Exception as exc:  # noqa: BLE001
+            result[name] = {"error": f"{type(exc).__name__}: {exc}"}
+
+    def tcp(name, host, port):
+        try:
+            with socket.create_connection((host, port), timeout=20) as s:
+                banner = s.recv(200).decode("latin-1", "replace").strip()
+            result[name] = {"connected": True, "banner": banner}
+        except Exception as exc:  # noqa: BLE001
+            result[name] = {"error": f"{type(exc).__name__}: {exc}"}
+
+    tcp("cerberus_ftp_21", CERBERUS_HOST, 21)
+    http("cerberus_https", f"https://{CERBERUS_HOST}/")
+    http("publishedprices_https_login", "https://url.publishedprices.co.il/login")
+    http("shufersal_pricefull_p1", f"{SHUFERSAL_URL}?catID=2&page=1")
+    http("shufersal_pricefull_store1", f"{SHUFERSAL_URL}?catID=2&storeId=1")
+    (out / "probe.json").write_text(json.dumps(result, indent=1), "utf-8")
+    print(json.dumps(result, indent=1), file=sys.stderr)
+    return result
+
+
 def load_branch(data: Path, ref: str) -> Branch:
     chain, store = ref.split("/")
     raw = gzip.decompress((data / chain / f"{int(store)}.json.gz").read_bytes())
@@ -109,12 +147,17 @@ def main(argv: list[str] | None = None) -> int:
     a.add_argument("--chain", action="append", choices=sorted(CHAINS), required=True)
     a.add_argument("--stores", action="append", help="chain=id,id (default: first N)")
     a.add_argument("--max-stores", type=int, default=3)
+    p = sub.add_parser("probe", help="record raw portal answers (reachability check)")
+    p.add_argument("--out", type=Path, required=True)
     q = sub.add_parser("quote")
     q.add_argument("--data", type=Path, required=True)
     q.add_argument("--list", type=Path, required=True, help="JSON [{name, quantity, unit}]")
     q.add_argument("--branch", action="append", required=True, help="chain/store_id")
     args = ap.parse_args(argv)
 
+    if args.cmd == "probe":
+        probe(args.out)
+        return 0
     if args.cmd == "ingest":
         report = ingest(args.out, args.chain, _store_filter(args.stores), args.max_stores)
         return 0 if any(r["ok"] for r in report.values()) else 1

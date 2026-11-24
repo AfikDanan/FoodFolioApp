@@ -47,8 +47,9 @@ def parse_file_name(name: str) -> FileName | None:
         return None
     kind = m["kind"].lower()
     parts = [p for p in m["rest"].split("-") if p]
-    stamp = "".join(p for p in parts if len(p) >= 8)  # the date/time parts
-    ids = [p for p in parts if len(p) < 8]
+    # ids come first, then the timestamp: either 202611200010 or 20261124-020 (Shufersal).
+    first_date = next((i for i, p in enumerate(parts) if len(p) >= 8), len(parts))
+    ids, stamp = parts[:first_date], "".join(parts[first_date:])
     store = str(int(ids[0])) if ids and kind != "stores" else None
     return FileName(kind, m["chain"], store, stamp)
 

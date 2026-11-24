@@ -40,6 +40,10 @@ jobs:
       - name: Tests
         run: pip install -q pytest && python -m pytest -q
 
+      - name: Probe the portals (raw answers kept in the artifact)
+        run: python -m pricedata probe --out dist
+        continue-on-error: true
+
       - name: Ingest (Rami Levy, Yochananof, Shufersal)
         env:
           STORES: ${{ github.event.inputs.stores }}

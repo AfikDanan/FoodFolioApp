@@ -57,8 +57,8 @@ def test_file_names():
         "1",
         "202611200010",
     )
-    b = parse_file_name("Stores7290027600007-000-202611200201.gz")
-    assert b.kind == "stores" and b.store_id is None
+    b = parse_file_name("Stores7290027600007-000-20261124-020.gz")  # seen live, Shufersal
+    assert b.kind == "stores" and b.store_id is None and b.stamp == "20261124020"
     c = parse_file_name(
         "https://pricesprodpublic.blob.core.windows.net/pricefull/"
         "PriceFull7290027600007-413-202611200300.gz?sv=2014&sig=x"
