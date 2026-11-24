@@ -29,7 +29,7 @@ PRICES = """<?xml version="1.0" encoding="utf-8"?>
   <UnitQty>ק"ג</UnitQty><Quantity>1</Quantity><bIsWeighted>1</bIsWeighted>
   <ItemPrice>5.00</ItemPrice></Item>
  <Item><ItemCode>7290000000042</ItemCode><ItemName>ביצים L 12 יח'</ItemName>
-  <UnitQty>יחידה</UnitQty><Quantity>12</Quantity><bIsWeighted>0</bIsWeighted>
+  <UnitQty>יחידה</UnitQty><Quantity>1</Quantity><bIsWeighted>0</bIsWeighted>
   <ItemPrice>13.90</ItemPrice></Item>
  <Item><ItemCode>bad</ItemCode><ItemName>מחיר אפס</ItemName><ItemPrice>0</ItemPrice></Item>
 </Items></Root>"""
@@ -93,6 +93,7 @@ def test_items():
     onion = items["2000001"]
     assert onion.weighted and onion.price == 5.0 and onion.qty == 1000
     assert items["7290000000042"].unit == "unit"
+    assert items["7290000000042"].qty == 12  # Quantity says 1, the name says 12 (seen live)
 
 
 def test_stores_both_layouts_and_utf16():
@@ -122,6 +123,25 @@ def _branch(chain, store, rows):
 
 def _rows(xml):
     return [[i.code, i.name, i.price, i.qty, i.unit, int(i.weighted)] for i in iter_items(xml)]
+
+
+def test_prefers_same_dimension_and_exact_name():
+    rows = [
+        ["1", "סוכר וניל 10 יח", 3.8, 10, "unit", 0],
+        ["2", "סוכר לבן 1 קג", 5.9, 1000, "g", 0],
+        ["3", "עגבניות מרוסקות 800 גרם", 7.9, 800, "g", 0],
+        ["4", "עגבניות", 6.9, 1000, "g", 1],
+    ]
+    q = quote(
+        _branch("x", "1", rows),
+        [
+            {"name": "סוכר", "quantity": 200, "unit": "גרם"},
+            {"name": "עגבניות", "quantity": 500, "unit": "גרם"},
+        ],
+    )
+    sugar, tomatoes = q.lines
+    assert sugar.code == "2" and not sugar.estimated
+    assert tomatoes.code == "4" and tomatoes.cost == 3.45
 
 
 SHOPPING = [

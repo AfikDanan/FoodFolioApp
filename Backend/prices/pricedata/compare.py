@@ -141,6 +141,9 @@ def candidates(products: list[Product], name: str) -> list[Product]:
         hits = [p for p in products if all(w in p.norm for w in words)]
     if not hits:
         return []
+    exact = [p for p in hits if p.norm == " ".join(words)]  # usually the loose produce item
+    if exact:
+        return exact
     starts = [p for p in hits if p.norm.startswith(words[0])]
     return starts or hits
 
@@ -165,7 +168,11 @@ def quote(branch: Branch, shopping: list[dict], pinned: dict[str, str] | None = 
         if not pool:
             lines.append(Line(name, "missing"))
             continue
-        best = min(pool, key=lambda p: (_cost(p, amount, base)[1], p.name))
+        # Prefer products sized in the list's dimension (grams for grams): "סוכר" 200 g should
+        # buy sugar by weight, not a 10-sachet vanilla sugar pack that only looks cheaper.
+        best = min(
+            pool, key=lambda p: (_cost(p, amount, base)[2], _cost(p, amount, base)[1], p.name)
+        )
         packs, cost, est = _cost(best, amount, base)
         lines.append(Line(name, "matched", best.name, best.code, packs, cost, est))
     matched = [x for x in lines if x.status == "matched"]

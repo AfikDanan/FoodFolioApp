@@ -190,6 +190,9 @@ def xml_store_id(xml: bytes) -> str | None:
     return None
 
 
+_PACK_COUNT = re.compile(r"(\d+)\s*(?:יח|יחידות|יחי)")
+
+
 def iter_items(xml: bytes) -> Iterator[Item]:
     root = _root(xml)
     for el in _find_all(root, "Item"):
@@ -203,6 +206,11 @@ def iter_items(xml: bytes) -> Iterator[Item]:
         qty, unit = _to_base(_num(f.get("quantity")), normalize_unit(f.get("unitqty", "")))
         if weighted:
             qty, unit = 1000.0, "g"  # price is per kg
+        elif unit == "unit" and (qty or 0) <= 1:
+            # Packs of units often say Quantity=1 and keep the count in the name ("ביצים L 12 יח").
+            m = _PACK_COUNT.search(name)
+            if m:
+                qty = float(m.group(1))
         yield Item(
             code=code,
             name=name,

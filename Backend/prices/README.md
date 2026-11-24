@@ -23,18 +23,26 @@ everywhere (`ItemCode`, `ItemName`, `ItemPrice`, `Quantity`, `UnitQty`, `bIsWeig
 - `ItemCode` is the barcode (GTIN) for packaged goods, so the same product lines up across chains.
   Loose produce (`bIsWeighted=1`) has chain-internal codes and a price per kg.
 
-**The portals.**
+**The portals (checked live from GitHub Actions on 24 Nov 2026).** All three answer from
+GitHub's US servers, so no Israeli IP is needed for these chains.
 
-| Chain | Portal | Access |
-|---|---|---|
-| Rami Levy | Cerberus `url.retail.publishedprices.co.il` | FTPS, user `RamiLevi`, empty password |
-| Yochananof | same Cerberus server | FTPS, user `yohananof` |
-| Shufersal | `prices.shufersal.co.il` | HTML listing → time-limited Azure blob links |
+| Chain | Portal | Branches (Stores file) | Example branch file |
+|---|---|---|---|
+| Rami Levy | Cerberus FTPS `url.retail.publishedprices.co.il`, user `RamiLevi`, no password | 99 | 15,446 products: 640 KB gz → **290 KB** our JSON |
+| Yochananof | same server, user `yohananof` | 51 (48 publish prices) | 11,607 products: 540 KB → **174 KB** |
+| Shufersal | `prices.shufersal.co.il` listing → Azure blob links | 418 (426 price files) | 6,525 products: 334 KB → **114 KB** |
 
-Hosts, user names and chain ids come from the MIT-licensed `il-supermarket-scraper` (35+ chains),
-which is kept up to date against the live portals. **Not yet verified from our side**: the dev
-sandbox could not reach the portals. The workflow's run on this branch is the live check; its
-summary shows a per-chain report (reachable, branch count, file sizes, item counts).
+A full run of the three chains (3 branches each) takes about 2 minutes. Things learned live:
+the FTPS server needs `trust_server_pasv_ipv4_address`; file names come as
+`chain-store-stamp`, `chain-subchain-store-stamp` and lower case, with split timestamps, so the
+store id is taken from the last id and checked against the file's own `StoreId`; packs of units
+often say `Quantity=1` and keep the count in the name ("ביצים 12 יח").
+
+**Sample run** (an 11-item cake-and-dinner list, first branch of each chain, same CI run):
+Rami Levy Talpiot 123.37 ₪, Yochananof Mapuach 126.09 ₪, Shufersal Sheli Ben Yehuda 152.88 ₪,
+10 of 10 priced items matched everywhere. That run also exposed bad picks ("סוכר" → vanilla
+sugar sachets, "עגבניות" → crushed tomatoes), which are now fixed by preferring the exact loose
+item and products sized in the list's unit. Expect more of these: see decision 3.
 
 **The hard part is matching, not fetching.** A list says "קמח, 500 גרם"; a file says
 "קמח לבן מנופה סוגת 1 ק"ג". `compare.py` matches by words, prefers names that start with the
@@ -42,20 +50,22 @@ ingredient ("חלב" picks milk, not "שוקולד חלב"), covers the amount w
 weight for produce), reuses one chain's barcode at the others, and ranks branches only on the
 items every branch carries. Cups and spoons are converted as ml, one onion is guessed at 150 g,
 and "a pinch" is assumed to be at home; those rows are marked `estimated`. Good enough to rank
-stores; not good enough to promise a total to the shekel.
+stores; not good enough to promise a total to the shekel. Totals are shelf prices: deals from
+the `PromoFull` files ("2 for 10", club prices) are not applied yet.
 
 ## Options: cost and speed
 
 | Option | Running cost | Time to working | Notes |
 |---|---|---|---|
-| **GitHub Actions cron + release assets** (this PR) | $0 (public repo: unlimited minutes; private: ~5 min/day of the 2,000 free) | Done once merged | Runners are in the US: if a portal blocks foreign IPs, that chain fails (the report shows it) |
-| Lambda + EventBridge + S3 in `il-central-1` | Cents a month | ~1 day: the backend is not deployed yet | Israeli IP avoids geo-blocks; same code (stdlib only, 15 min limit is plenty for a few chains) |
+| **GitHub Actions cron + release assets** (this PR) | $0 (public repo: unlimited minutes; private: ~2-5 min/day of the 2,000 free) | Done once merged | Verified working for all 3 chains from US runners |
+| Lambda + EventBridge + S3 in `il-central-1` | Cents a month | ~1 day: the backend is not deployed yet | Only needed for a chain that blocks foreign IPs; same code (stdlib only) |
 | Scrape on the phone | $0 | Slow, fragile | Multi-MB files per branch, no FTPS in React Native, every user hits the portals. Not recommended |
 | Third-party aggregator API | Unknown | — | I found no official free API; consumer comparison sites have no open API and scraping them breaks their terms |
 
 **Recommendation:** ship the GitHub Actions path first (it costs nothing and is already built), and
-price the list on the phone from the 1-3 branch files the user picked (port `compare.py` to JS,
-about 150 lines). Move ingest to Lambda in Tel Aviv only for chains the report shows as blocked.
+price the list on the phone from the 1-3 branch files the user picked (100-300 KB each; port
+`compare.py` to JS, about 150 lines). Move ingest to Lambda in Tel Aviv only if a chain we add
+later blocks foreign IPs.
 Add a Lambda `/prices/quote` endpoint only if matching needs the model (see below).
 
 ## Decisions for you
@@ -83,7 +93,8 @@ to search in the chain's app.
 cd Backend/prices
 python -m pytest -q
 python -m pricedata ingest --out dist --chain ramilevy --chain shufersal --stores ramilevy=1
-python -m pricedata quote --data dist --list list.json --branch ramilevy/1 --branch shufersal/1
+python -m pricedata probe --out dist      # raw reachability check
+python -m pricedata quote --data dist --list sample_list.json --branch ramilevy/1 --branch shufersal/1
 ```
 
-`list.json` is the app's shopping list shape: `[{"name": "קמח", "quantity": 1, "unit": "ק\"ג"}]`.
+`sample_list.json` is in the app's shopping list shape: `[{"name": "קמח", "quantity": 1, "unit": "ק\"ג"}]`.
