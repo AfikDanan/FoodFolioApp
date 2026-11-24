@@ -1,0 +1,13 @@
+[
+ {"name": "קמח לבן", "quantity": 1, "unit": "ק\"ג"},
+ {"name": "סוכר", "quantity": 200, "unit": "גרם"},
+ {"name": "ביצים", "quantity": 3, "unit": "יחידה"},
+ {"name": "חלב", "quantity": 1, "unit": "כוס"},
+ {"name": "חמאה", "quantity": 100, "unit": "גרם"},
+ {"name": "שמן קנולה", "quantity": 2, "unit": "כף"},
+ {"name": "בצל", "quantity": 2, "unit": "יחידה"},
+ {"name": "עגבניות", "quantity": 500, "unit": "גרם"},
+ {"name": "חזה עוף", "quantity": 1, "unit": "ק\"ג"},
+ {"name": "אורז", "quantity": 1, "unit": "כוס"},
+ {"name": "מלח", "quantity": 1, "unit": "קורט"}
+]
