@@ -144,6 +144,14 @@ def test_prefers_same_dimension_and_exact_name():
     assert tomatoes.code == "4" and tomatoes.cost == 3.45
 
 
+def test_counted_produce_prefers_weighed_item_over_other_unit_items():
+    rows = [["1", "בצל ירוק", 11.8, 1, "unit", 0], ["2", "בצל יבש", 3.9, 1000, "g", 1]]
+    (line,) = quote(
+        _branch("x", "1", rows), [{"name": "בצל", "quantity": 2, "unit": "יחידה"}]
+    ).lines
+    assert line.code == "2" and line.estimated  # 2 × 150 g guessed
+
+
 SHOPPING = [
     {"name": "קמח", "quantity": 1.5, "unit": 'ק"ג'},
     {"name": "חלב", "quantity": 1, "unit": "כוס"},

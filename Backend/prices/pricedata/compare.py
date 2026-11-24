@@ -132,6 +132,12 @@ def _cost(product: Product, need: float, base: str) -> tuple[float, float, bool]
     return packs, round(packs * product.price, 2), estimated
 
 
+def _sizable(product: Product, base: str) -> bool:
+    if product.weighted:
+        return True
+    return bool(product.qty) and (product.unit == base or {product.unit, base} == {"g", "ml"})
+
+
 def candidates(products: list[Product], name: str) -> list[Product]:
     words = normalize(name).split()
     if not words:
@@ -168,11 +174,9 @@ def quote(branch: Branch, shopping: list[dict], pinned: dict[str, str] | None = 
         if not pool:
             lines.append(Line(name, "missing"))
             continue
-        # Prefer products sized in the list's dimension (grams for grams): "סוכר" 200 g should
-        # buy sugar by weight, not a 10-sachet vanilla sugar pack that only looks cheaper.
-        best = min(
-            pool, key=lambda p: (_cost(p, amount, base)[2], _cost(p, amount, base)[1], p.name)
-        )
+        # Products whose size cannot cover the amount (a "10 sachets" pack for 200 g of sugar)
+        # only win when nothing sizable matched; otherwise the cheapest way to cover it wins.
+        best = min(pool, key=lambda p: (not _sizable(p, base), _cost(p, amount, base)[1], p.name))
         packs, cost, est = _cost(best, amount, base)
         lines.append(Line(name, "matched", best.name, best.code, packs, cost, est))
     matched = [x for x in lines if x.status == "matched"]
