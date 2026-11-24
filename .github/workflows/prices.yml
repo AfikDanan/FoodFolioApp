@@ -1,0 +1,86 @@
+name: Supermarket prices
+
+# Pulls the price files Israeli chains must publish, shrinks them to one small JSON per branch,
+# and (on main) publishes them as assets of the "prices-latest" release so the app can download
+# them from GitHub's CDN for free. On other branches it only runs the tests and a reachability
+# probe, and keeps the output as a workflow artifact.
+
+on:
+  schedule:
+    - cron: "15 3 * * *" # 05:15 / 06:15 Israel time, after the chains' nightly full files
+  workflow_dispatch:
+    inputs:
+      stores:
+        description: "Branches per chain, e.g. ramilevy=1,2 shufersal=1 (empty = first 3)"
+        required: false
+  push:
+    paths:
+      - "Backend/prices/**"
+      - ".github/workflows/prices.yml"
+
+permissions:
+  contents: write # only used by the publish step, which runs on main
+
+concurrency:
+  group: prices-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ingest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: Backend/prices
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Tests
+        run: pip install -q pytest && python -m pytest -q
+
+      - name: Ingest (Rami Levy, Yochananof, Shufersal)
+        env:
+          STORES: ${{ github.event.inputs.stores }}
+        run: |
+          args=()
+          for s in $STORES; do args+=(--stores "$s"); done
+          python -m pricedata ingest --out dist \
+            --chain ramilevy --chain yohananof --chain shufersal "${args[@]}"
+        continue-on-error: true # the report below says which chains failed
+
+      - name: Report
+        if: always()
+        run: |
+          test -f dist/report.json && cat dist/report.json || echo "no report"
+          {
+            echo "### Price ingest"
+            echo '```json'
+            cat dist/report.json 2>/dev/null || echo '{}'
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: prices
+          path: Backend/prices/dist
+          retention-days: 7
+
+      - name: Publish to the prices-latest release
+        if: github.ref == 'refs/heads/main' && hashFiles('Backend/prices/dist/report.json') != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Release assets are flat, so ramilevy/1.json.gz becomes ramilevy-1.json.gz.
+          mkdir -p flat
+          cp dist/stores.json dist/report.json flat/
+          for f in dist/*/*.json.gz; do
+            [ -e "$f" ] || continue
+            chain=$(basename "$(dirname "$f")"); cp "$f" "flat/$chain-$(basename "$f")"
+          done
+          gh release view prices-latest >/dev/null 2>&1 || \
+            gh release create prices-latest --title "Supermarket prices (latest)" \
+              --notes "Rebuilt daily by the Supermarket prices workflow." --latest=false
+          gh release upload prices-latest flat/* --clobber
