@@ -71,6 +71,9 @@ class CerberusSource:
 
     def _connect(self) -> FTP_TLS:
         ftp = FTP_TLS(self.host, timeout=TIMEOUT_S)
+        # The server answers PASV with its real public address, which differs from the DNS name's
+        # (same setting as il-supermarket-scraper). Without it the data connection hangs.
+        ftp.trust_server_pasv_ipv4_address = True
         ftp.login(self.chain.ftp_user, "")
         ftp.prot_p()
         return ftp

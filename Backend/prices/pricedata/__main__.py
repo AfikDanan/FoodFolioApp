@@ -16,6 +16,7 @@ from __future__ import annotations
 import argparse
 import gzip
 import json
+import re
 import sys
 import time
 from dataclasses import asdict
@@ -52,7 +53,12 @@ def ingest(out: Path, chains: list[str], stores_wanted: dict[str, set[str]], max
             for s in stores:
                 all_stores.append({"chain": key, "chain_name": chain.name, **asdict(s)})
             names = {s.store_id: s.name for s in stores}
-            wanted = stores_wanted.get(key) or {s.store_id for s in stores[:max_stores]}
+            wanted = stores_wanted.get(key)
+            if not wanted:  # the first branches that actually publish a PriceFull
+                publishing = {x.meta.store_id for x in src.list("pricefull")}
+                entry["publishing_branches"] = len(publishing)
+                wanted = {s.store_id for s in stores if s.store_id in publishing}
+                wanted = set(sorted(wanted, key=int)[:max_stores])
             for store_id in sorted(wanted, key=int):
                 try:
                     pf = latest(src.list("pricefull", store_id), "pricefull", store_id)
@@ -100,7 +106,13 @@ def probe(out: Path) -> dict:
     import socket
     import urllib.request
 
-    from .sources import CERBERUS_HOST, SHUFERSAL_URL, USER_AGENT
+    from .sources import (
+        CERBERUS_HOST,
+        SHUFERSAL_URL,
+        USER_AGENT,
+        CerberusSource,
+        parse_shufersal_listing,
+    )
 
     out.mkdir(parents=True, exist_ok=True)
     result: dict = {}
@@ -111,7 +123,16 @@ def probe(out: Path) -> dict:
             with urllib.request.urlopen(req, timeout=30) as r:
                 body = r.read()
             (out / f"probe-{name}.html").write_bytes(body)
-            result[name] = {"status": r.status, "bytes": len(body)}
+            text = body.decode("utf-8", "replace")
+            links = [x.locator for x in parse_shufersal_listing(text)]
+            hrefs = re.findall(r'href="([^"]{0,160})', text)
+            result[name] = {
+                "status": r.status,
+                "bytes": len(body),
+                "price_links": len(links),
+                "sample_links": [u.split("?")[0] for u in links[:2]],
+                "sample_hrefs": hrefs[:8],
+            }
         except Exception as exc:  # noqa: BLE001
             result[name] = {"error": f"{type(exc).__name__}: {exc}"}
 
@@ -124,6 +145,12 @@ def probe(out: Path) -> dict:
             result[name] = {"error": f"{type(exc).__name__}: {exc}"}
 
     tcp("cerberus_ftp_21", CERBERUS_HOST, 21)
+    for key in ("ramilevy",):
+        try:
+            names = CerberusSource(CHAINS[key]).list("stores")
+            result[f"cerberus_list_{key}"] = {"files": [x.name for x in names][:3]}
+        except Exception as exc:  # noqa: BLE001
+            result[f"cerberus_list_{key}"] = {"error": f"{type(exc).__name__}: {exc}"}
     http("cerberus_https", f"https://{CERBERUS_HOST}/")
     http("publishedprices_https_login", "https://url.publishedprices.co.il/login")
     http("shufersal_pricefull_p1", f"{SHUFERSAL_URL}?catID=2&page=1")

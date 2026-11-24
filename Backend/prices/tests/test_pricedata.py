@@ -155,8 +155,9 @@ def test_ingest_end_to_end(tmp_path, monkeypatch):
             if kind == "stores":
                 meta = parse_file_name("Stores7290058140886-000-202611200000.gz")
                 return [Listing("s", meta, "s")]
-            name = f"PriceFull7290058140886-{int(store_id):03d}-202611200010.gz"
-            return [Listing(name, parse_file_name(name), name)]
+            ids = [store_id] if store_id else ["1", "39"]
+            names = [f"PriceFull7290058140886-{int(i):03d}-202611200010.gz" for i in ids]
+            return [Listing(n, parse_file_name(n), n) for n in names]
 
         def download(self, listing):
             if listing.locator == "s":
