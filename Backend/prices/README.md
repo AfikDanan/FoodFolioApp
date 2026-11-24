@@ -38,11 +38,13 @@ the FTPS server needs `trust_server_pasv_ipv4_address`; file names come as
 store id is taken from the last id and checked against the file's own `StoreId`; packs of units
 often say `Quantity=1` and keep the count in the name ("ביצים 12 יח").
 
-**Sample run** (an 11-item cake-and-dinner list, first branch of each chain, same CI run):
-Rami Levy Talpiot 123.37 ₪, Yochananof Mapuach 126.09 ₪, Shufersal Sheli Ben Yehuda 152.88 ₪,
-10 of 10 priced items matched everywhere. That run also exposed bad picks ("סוכר" → vanilla
-sugar sachets, "עגבניות" → crushed tomatoes), which are now fixed by preferring the exact loose
-item and products sized in the list's unit. Expect more of these: see decision 3.
+**Sample run** (an 11-item cake-and-dinner list, first branch of each chain, CI on this branch):
+Rami Levy Talpiot 98.67 ₪, Yochananof Mapuach 101.17 ₪, Shufersal Sheli Ben Yehuda 121.37 ₪, with
+all 10 priced items found at every branch. Earlier runs exposed bad picks that are now fixed
+(eggs priced per egg instead of per 12-pack, "בצל" → green onions). Still wrong in the latest
+run: "סוכר" → vanilla sugar, "חלב" → a coffee milk drink, and "עגבניות" → crushed tomatoes
+(the chains call the loose item "עגבניה", so the cheaper canned one wins). This is the expected
+failure mode of name matching; see decision 3.
 
 **The hard part is matching, not fetching.** A list says "קמח, 500 גרם"; a file says
 "קמח לבן מנופה סוגת 1 ק"ג". `compare.py` matches by words, prefers names that start with the
