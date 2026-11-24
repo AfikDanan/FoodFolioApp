@@ -65,6 +65,11 @@ def test_file_names():
     )
     assert c.store_id == "413"
     assert parse_file_name("readme.txt") is None
+    # Live names (Nov 2026): sub-chain + store, split timestamp, lower case.
+    d = parse_file_name("PriceFull7290058140886-001-732-20261124-161131.gz")
+    assert (d.store_id, d.stamp) == ("732", "20261124161131")
+    assert parse_file_name("pricefull7290058140886-039-202611240517.gz").store_id == "39"
+    assert parse_file_name("PriceFull7290027600007-001-001-20261124-033838.gz").store_id == "1"
 
 
 def test_unpack_gzip_zip_plain():
@@ -78,6 +83,9 @@ def test_unpack_gzip_zip_plain():
 
 
 def test_items():
+    from pricedata.formats import xml_store_id
+
+    assert xml_store_id(PRICES.encode()) == "1"
     items = {i.code: i for i in iter_items(gzip.compress(PRICES.encode()))}
     assert "bad" not in items
     assert (items["7290000000011"].qty, items["7290000000011"].unit) == (1000, "g")

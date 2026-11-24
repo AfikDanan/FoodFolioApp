@@ -65,6 +65,22 @@ jobs:
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
+      - name: Sample quote (first branch of each chain)
+        if: always()
+        run: |
+          refs=$(python -c "import json; r=json.load(open('dist/report.json')); print(' '.join(f'--branch {k}/{v[\"branches\"][0][\"store_id\"]}' for k, v in r.items() if v['branches']))")
+          [ -n "$refs" ] || exit 0
+          python -m pricedata quote --data dist --list sample_list.json $refs > dist/sample_quote.json
+          python - <<'PY'
+          import json
+          q = json.load(open("dist/sample_quote.json"))
+          print("common items:", ", ".join(q["common_items"]))
+          for b in q["branches"]:
+              print(f"\n== {b['chain']} #{b['store_id']} {b['store_name']}: comparable {b['comparable_total']} / total {b['total']} ({b['matched']} matched, {b['missing']} missing)")
+              for l in b["lines"]:
+                  print(f"  {l['name']:<12} {l['status']:<8} {l['cost']:>7}  {l['product']}{' ~' if l['estimated'] else ''}")
+          PY
+
       - uses: actions/upload-artifact@v4
         if: always()
         with:

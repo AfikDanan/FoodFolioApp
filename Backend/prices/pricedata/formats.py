@@ -50,7 +50,9 @@ def parse_file_name(name: str) -> FileName | None:
     # ids come first, then the timestamp: either 202611200010 or 20261124-020 (Shufersal).
     first_date = next((i for i, p in enumerate(parts) if len(p) >= 8), len(parts))
     ids, stamp = parts[:first_date], "".join(parts[first_date:])
-    store = str(int(ids[0])) if ids and kind != "stores" else None
+    # chain-store-stamp, or chain-subchain-store-stamp (seen live: Rami Levy 001-732,
+    # Shufersal 001-001), so the store is the last id before the timestamp.
+    store = str(int(ids[-1])) if ids and kind != "stores" else None
     return FileName(kind, m["chain"], store, stamp)
 
 
@@ -178,6 +180,14 @@ def _to_base(qty: float | None, unit: str | None) -> tuple[float | None, str]:
     if unit == "l":
         return (qty * 1000 if qty else None), "ml"
     return qty, unit or "unit"
+
+
+def xml_store_id(xml: bytes) -> str | None:
+    """The StoreId a price file declares about itself, to check the file-name parse."""
+    for el in _root(xml).iter():
+        if _tag(el) == "storeid" and (el.text or "").strip().isdigit():
+            return str(int(el.text))
+    return None
 
 
 def iter_items(xml: bytes) -> Iterator[Item]:

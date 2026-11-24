@@ -23,7 +23,7 @@ from dataclasses import asdict
 from pathlib import Path
 
 from .compare import Branch, compare
-from .formats import iter_items, parse_stores, unpack
+from .formats import iter_items, parse_stores, unpack, xml_store_id
 from .sources import CHAINS, latest, source_for
 
 
@@ -55,8 +55,10 @@ def ingest(out: Path, chains: list[str], stores_wanted: dict[str, set[str]], max
             names = {s.store_id: s.name for s in stores}
             wanted = stores_wanted.get(key)
             if not wanted:  # the first branches that actually publish a PriceFull
-                publishing = {x.meta.store_id for x in src.list("pricefull")}
+                listed = src.list("pricefull")
+                publishing = {x.meta.store_id for x in listed}
                 entry["publishing_branches"] = len(publishing)
+                entry["sample_files"] = sorted(x.name for x in listed)[:4]
                 wanted = {s.store_id for s in stores if s.store_id in publishing}
                 wanted = set(sorted(wanted, key=int)[:max_stores])
             for store_id in sorted(wanted, key=int):
@@ -65,7 +67,11 @@ def ingest(out: Path, chains: list[str], stores_wanted: dict[str, set[str]], max
                     if pf is None:
                         raise RuntimeError("no PriceFull file listed")
                     raw = src.download(pf)
-                    items = list(iter_items(unpack(raw)))
+                    xml = unpack(raw)
+                    declared = xml_store_id(xml)
+                    if declared and declared != store_id:
+                        raise RuntimeError(f"{pf.name} declares StoreId {declared}")
+                    items = list(iter_items(xml))
                     path = out / key / f"{store_id}.json.gz"
                     path.parent.mkdir(parents=True, exist_ok=True)
                     doc = {
